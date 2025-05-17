@@ -2,56 +2,109 @@
 # This file contains global constants used throughout the ERD design tool application.
 
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt 
+from PyQt6.QtCore import Qt
 
-DEFAULT_TABLE_WIDTH = 200 
+# --- Existing Constants ---
+DEFAULT_TABLE_WIDTH = 200
 TABLE_HEADER_HEIGHT = 30
-COLUMN_HEIGHT = 22 
+COLUMN_HEIGHT = 22
 PADDING = 10
-GRID_SIZE = 20 
-RELATIONSHIP_HANDLE_SIZE = 8 
-MIN_HORIZONTAL_SEGMENT = GRID_SIZE * 1.5 
-CSV_TABLE_DEF_MARKER = "TABLE_DEFINITION" 
-CSV_COLUMN_DEF_MARKER = "COLUMN_DEFINITION" 
-CSV_TABLE_POSITION_MARKER = "TABLE_POSITION" 
-CSV_RELATIONSHIP_DEF_MARKER = "RELATIONSHIP_DEF" 
-CARDINALITY_OFFSET = 10 
-CARDINALITY_TEXT_MARGIN = 25 
+GRID_SIZE = 20
+RELATIONSHIP_HANDLE_SIZE = 8
+MIN_HORIZONTAL_SEGMENT = GRID_SIZE * 1.5
+CSV_TABLE_DEF_MARKER = "TABLE_DEFINITION" # May not be used if all table info is under TABLE_POSITION
+CSV_COLUMN_DEF_MARKER = "COLUMN_DEFINITION" # Used if columns are listed separately
+CSV_TABLE_POSITION_MARKER = "TABLE_POSITION" # Used for table x,y,width,colors
+CSV_RELATIONSHIP_DEF_MARKER = "RELATIONSHIP_DEF"
+CARDINALITY_OFFSET = 10
+CARDINALITY_TEXT_MARGIN = 25
 TABLE_RESIZE_HANDLE_WIDTH = 10
 MIN_TABLE_WIDTH = 120
 
-# Default Theme Colors - These are base values, will be updated by theme selection
-# These are dictionaries that will be populated by the main window based on theme choice
+# --- New Constants for Canvas Size ---
+DEFAULT_CANVAS_WIDTH = 4000
+DEFAULT_CANVAS_HEIGHT = 3000
+CSV_CANVAS_SIZE_MARKER = "CANVAS_SIZE_DEFINITION" # Marker for CSV
+
+# --- New Constants for Editable Data Types ---
+# This is the master list of data types the application knows about by default.
+# The user-editable list will be loaded from config or initialized from this.
+DEFAULT_COLUMN_DATA_TYPES = [
+    "TEXT", "INTEGER", "REAL", "BLOB", "VARCHAR(255)", "BOOLEAN",
+    "DATE", "DATETIME", "NUMERIC", "TIMESTAMP", "SERIAL", "UUID",
+    "CHAR", "VARCHAR", "INT", "SMALLINT", "BIGINT", "DECIMAL",
+    "FLOAT", "DOUBLE PRECISION", "TIME", "JSON"
+]
+
+
+# --- Globally Accessible Current Settings (to be updated from config/UI) ---
+# These will be dictionaries or simple types updated by main_window.py
+current_theme_settings = {} # This is populated by main_window.py
+
+# Holds the current canvas dimensions, loaded from config or defaults.
+current_canvas_dimensions = {
+    "width": DEFAULT_CANVAS_WIDTH,
+    "height": DEFAULT_CANVAS_HEIGHT
+}
+
+# Holds the current list of user-editable column data types.
+# Loaded from config, or defaults to DEFAULT_COLUMN_DATA_TYPES.
+editable_column_data_types = DEFAULT_COLUMN_DATA_TYPES[:] # Start with a copy
+
+
+# --- Theme Colors (unchanged from previous versions) ---
 light_theme_colors = {
-    "window_bg": QColor("#e8e8e8"), "view_bg": QColor("#f8f9fa"), "view_border": QColor("#ced4da"),
-    "toolbar_bg": QColor("#e9ecef"), "toolbar_border": QColor("#ced4da"),
-    "button_bg": QColor("#f8f9fa"), "button_border": QColor("#adb5bd"),
-    "button_hover_bg": QColor("#e9ecef"), "button_pressed_bg": QColor("#dee2e6"),
-    "button_checked_bg": QColor("#cfe2ff"), "button_checked_border": QColor("#9ec5fe"),
-    "text_color": QColor(Qt.GlobalColor.black), "dialog_text_color": QColor(Qt.GlobalColor.black),
-    "default_table_body_color": QColor(235, 235, 250), 
-    "default_table_header_color": QColor(200, 200, 230),
-    "grid_color": QColor(200, 200, 200, 60),
-    "relationship_line_color": QColor(70, 70, 110),
-    "cardinality_text_color": QColor(30,30,30),
+    "window_bg": QColor("#F8F9FA"),
+    "view_bg": QColor("#FFFFFF"),
+    "view_border": QColor("#DEE2E6"),
+    "toolbar_bg": QColor("#E9ECEF"),
+    "toolbar_border": QColor("#CED4DA"),
+    "button_bg": QColor("#FFFFFF"),
+    "button_border": QColor("#CED4DA"),
+    "button_hover_bg": QColor("#E9ECEF"),
+    "button_pressed_bg": QColor("#DEE2E6"),
+    "button_checked_bg": QColor("#007BFF"),
+    "button_checked_text_color": QColor(Qt.GlobalColor.white),
+    "button_checked_border": QColor("#0056B3"),
+    "text_color": QColor("#212529"),
+    "dialog_text_color": QColor("#212529"),
+    "default_table_body_color": QColor("#FFFFFF"),
+    "default_table_header_color": QColor("#6C757D"),
+    "default_table_header_text_color": QColor(Qt.GlobalColor.white),
+    "default_table_body_text_color": QColor("#495057"),
+    "grid_color": QColor(233, 236, 239, 100),
+    "relationship_line_color": QColor(108, 117, 125),
+    "cardinality_text_color": QColor(73, 80, 87),
+    "dialog_input_bg": QColor("#FFFFFF"),
+    "dialog_input_border": QColor("#CED4DA"),
 }
 
 dark_theme_colors = {
-    "window_bg": QColor("#2b2b2b"), "view_bg": QColor("#3c3c3c"), "view_border": QColor("#555555"),
-    "toolbar_bg": QColor("#333333"), "toolbar_border": QColor("#505050"),
-    "button_bg": QColor("#4f4f4f"), "button_border": QColor("#666666"),
-    "button_hover_bg": QColor("#5a5a5a"), "button_pressed_bg": QColor("#646464"),
-    "button_checked_bg": QColor("#4a5a7f"), "button_checked_border": QColor("#6c7ca0"),
-    "text_color": QColor(Qt.GlobalColor.white), "dialog_text_color": QColor(Qt.GlobalColor.white),
-    "default_table_body_color": QColor(60, 63, 65), 
-    "default_table_header_color": QColor(83, 83, 83),
-    "grid_color": QColor(100, 100, 100, 60),
-    "relationship_line_color": QColor(180, 180, 220),
-    "cardinality_text_color": QColor(220,220,220),
+    "window_bg": QColor("#212529"),
+    "view_bg": QColor("#2B3035"),
+    "view_border": QColor("#495057"),
+    "toolbar_bg": QColor("#343A40"),
+    "toolbar_border": QColor("#495057"),
+    "button_bg": QColor("#495057"),
+    "button_border": QColor("#6C757D"),
+    "button_hover_bg": QColor("#5A6268"),
+    "button_pressed_bg": QColor("#6C757D"),
+    "button_checked_bg": QColor("#007BFF"),
+    "button_checked_text_color": QColor(Qt.GlobalColor.white),
+    "button_checked_border": QColor("#0056B3"),
+    "text_color": QColor("#F8F9FA"),
+    "dialog_text_color": QColor("#F8F9FA"),
+    "default_table_body_color": QColor("#343A40"),
+    "default_table_header_color": QColor("#495057"),
+    "default_table_header_text_color": QColor(Qt.GlobalColor.white),
+    "default_table_body_text_color": QColor("#E9ECEF"),
+    "grid_color": QColor(73, 80, 87, 100),
+    "relationship_line_color": QColor(173, 181, 189),
+    "cardinality_text_color": QColor(206, 212, 218),
+    "dialog_input_bg": QColor("#343A40"),
+    "dialog_input_border": QColor("#6C757D"),
 }
 
-# current_theme_settings will be a copy of one of the above,
-# potentially overridden by user defaults for table colors.
-# It will be managed in the main_window.py
-# Initialize with light theme as a default AFTER light_theme_colors is defined.
-current_theme_settings = light_theme_colors.copy() # Corrected variable name
+# Note: current_theme_settings is initialized as an empty dict here.
+# main_window.py is responsible for populating it based on the loaded theme
+# and user default colors during its __init__ and update_theme_settings methods.

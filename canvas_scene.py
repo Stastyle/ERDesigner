@@ -2,15 +2,11 @@
 # Contains the ERDGraphicsScene class for managing scene interactions.
 
 from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPathItem, QMessageBox
-from PyQt6.QtCore import Qt, QPointF, QLineF
+from PyQt6.QtCore import Qt, QPointF, QRectF 
 from PyQt6.QtGui import QPen, QColor, QPainterPath, QTransform 
 
-# Assuming constants.py and utils.py are in the same directory or accessible via PYTHONPATH
 from constants import GRID_SIZE, DEFAULT_TABLE_WIDTH, TABLE_HEADER_HEIGHT, current_theme_settings
 from utils import snap_to_grid
-# gui_items will be imported where ERDGraphicsScene is instantiated if needed,
-# or we can import it here if there are direct instantiations or type checks.
-# For now, TableGraphicItem is checked using isinstance, so it needs to be known.
 from gui_items import TableGraphicItem, OrthogonalRelationshipLine
 
 
@@ -21,13 +17,12 @@ class ERDGraphicsScene(QGraphicsScene):
         self.start_item_for_line = None
         self.start_column_for_line = None 
         self.main_window = parent_window # Reference to ERDCanvasWindow
-        # Initialize grid_pen with a default color; it will be updated by apply_styles
-        self.grid_pen = QPen(QColor(200, 200, 200, 60), 0.5, Qt.PenStyle.SolidLine) 
+        self.grid_pen = QPen(QColor(current_theme_settings.get("grid_color", QColor(200, 200, 200, 60))), 
+                             0.5, Qt.PenStyle.SolidLine) 
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
         
-        # Update grid pen color from theme settings in case theme changed
         self.grid_pen.setColor(QColor(current_theme_settings.get("grid_color", QColor(200, 200, 200, 60))))
 
         left = int(rect.left()) - (int(rect.left()) % GRID_SIZE)
@@ -47,7 +42,6 @@ class ERDGraphicsScene(QGraphicsScene):
         view = self.views()[0] if self.views() else None
         if not view: return None, None
 
-        # Use view's transform for itemAt
         items = self.items(scene_pos, Qt.ItemSelectionMode.IntersectsItemShape, 
                            Qt.SortOrder.DescendingOrder, view.transform())
         table_item = None
@@ -57,7 +51,6 @@ class ERDGraphicsScene(QGraphicsScene):
             if isinstance(item, TableGraphicItem):
                 table_item = item
                 item_local_pos = table_item.mapFromScene(scene_pos)
-                # Check which column row this local_pos falls into
                 current_y_check = table_item.header_height + table_item.padding / 2
                 for idx, col_data in enumerate(table_item.table_data.columns):
                     col_rect = QRectF(0, current_y_check, table_item.width, table_item.column_row_height)
@@ -65,31 +58,33 @@ class ERDGraphicsScene(QGraphicsScene):
                         column_obj = col_data
                         break
                     current_y_check += table_item.column_row_height
-                break # Found the top-most TableGraphicItem
+                break 
         return table_item, column_obj
 
 
     def mouseDoubleClickEvent(self, event):
-        items_at_click = self.items(event.scenePos())
-        for item in items_at_click:
+        # Handle double-click on relationship lines first
+        for item in self.items(event.scenePos()):
             if isinstance(item, OrthogonalRelationshipLine):
                 if hasattr(self.main_window, 'edit_relationship_properties'):
                     self.main_window.edit_relationship_properties(item.relationship_data)
                     event.accept()
-                    return
-        
+                    return # Event handled
+
         table_item_at_click, _ = self.get_item_and_column_at(event.scenePos()) 
         if table_item_at_click is None: 
+            # Double-click on an empty area - restore adding table
             scene_pos = event.scenePos()
-            # Use default table width from constants for centering
-            # from constants import DEFAULT_TABLE_WIDTH, TABLE_HEADER_HEIGHT # Already imported at module level
+            # Calculate position for the new table, snapped to grid
             snapped_x = snap_to_grid(scene_pos.x() - DEFAULT_TABLE_WIDTH / 2, GRID_SIZE) 
-            snapped_y = snap_to_grid(scene_pos.y() - TABLE_HEADER_HEIGHT / 2, GRID_SIZE)
-            self.main_window.handle_add_table_button(pos=QPointF(snapped_x, snapped_y))
+            snapped_y = snap_to_grid(scene_pos.y() - TABLE_HEADER_HEIGHT / 2, GRID_SIZE) 
+            if self.main_window and hasattr(self.main_window, 'handle_add_table_button'):
+                self.main_window.handle_add_table_button(pos=QPointF(snapped_x, snapped_y))
+            event.accept() # Event handled by adding a table
         else: 
-            # Let the TableGraphicItem handle its own double click if it's a table
-            # This is done by not accepting the event here, so it propagates.
-            super().mouseDoubleClickEvent(event) 
+            # Double-click was on an item (e.g., a table that's not a relationship line).
+            # Let the item handle it or propagate to QGraphicsScene default.
+            super().mouseDoubleClickEvent(event)
 
 
     def mousePressEvent(self, event):
@@ -107,7 +102,7 @@ class ERDGraphicsScene(QGraphicsScene):
                     self.addItem(self.line_in_progress)
                     
                     start_col_idx = self.start_item_for_line.table_data.get_column_index(self.start_column_for_line.name)
-                    start_pos = QPointF() # Default
+                    start_pos = QPointF() 
                     if start_col_idx != -1:
                         start_y_in_item = self.start_item_for_line.header_height + self.start_item_for_line.padding / 2 + \
                                           (start_col_idx * self.start_item_for_line.column_row_height) + \
@@ -118,7 +113,7 @@ class ERDGraphicsScene(QGraphicsScene):
                             if event.scenePos().x() < self.start_item_for_line.sceneBoundingRect().center().x() \
                             else self.start_item_for_line.sceneBoundingRect().right()
                         start_pos = QPointF(start_x_scene, start_y_scene)
-                    else: # Fallback if column index somehow not found
+                    else: 
                         start_pos = self.start_item_for_line.get_attachment_point(None, from_column_name=self.start_column_for_line.name)
 
 
@@ -135,19 +130,20 @@ class ERDGraphicsScene(QGraphicsScene):
                     dest_table_data = target_table_item.table_data
                     dest_column_data = target_column_obj
 
-                    # Let main_window handle the logic of creating/validating the relationship
                     self.main_window.finalize_relationship_drawing(source_table_data, source_column_data, dest_table_data, dest_column_data)
                 else:
                     print(f"Relationship drawing: Second click target was not a valid column on a different table.")
                 
-                self.main_window.reset_drawing_mode() # Reset in all cases after second click attempt
+                if self.main_window:
+                    self.main_window.reset_drawing_mode()
+
         else:
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self.line_in_progress and self.start_item_for_line and self.start_column_for_line:
             start_col_idx = self.start_item_for_line.table_data.get_column_index(self.start_column_for_line.name)
-            start_pos = QPointF() # Default
+            start_pos = QPointF() 
             if start_col_idx != -1:
                 start_y_in_item = self.start_item_for_line.header_height + self.start_item_for_line.padding / 2 + \
                                   (start_col_idx * self.start_item_for_line.column_row_height) + \
@@ -158,8 +154,8 @@ class ERDGraphicsScene(QGraphicsScene):
                     if event.scenePos().x() < self.start_item_for_line.sceneBoundingRect().center().x() \
                     else self.start_item_for_line.sceneBoundingRect().right()
                 start_pos = QPointF(start_x_scene, start_y_scene)
-            else: # Fallback
-                 start_pos = self.start_item_for_line.get_attachment_point_to_pos(event.scenePos())
+            else: 
+                 start_pos = self.start_item_for_line.get_attachment_point(None, from_column_name=self.start_column_for_line.name)
 
 
             path = QPainterPath(start_pos)
@@ -169,9 +165,5 @@ class ERDGraphicsScene(QGraphicsScene):
             super().mouseMoveEvent(event)
 
     def update_relationships_for_table(self, table_name_moved):
-        """
-        This method is called when a table moves. It triggers the main window
-        to update all relationship lines connected to this table.
-        """
         if self.main_window and hasattr(self.main_window, 'update_all_relationships_graphics'):
             self.main_window.update_all_relationships_graphics()

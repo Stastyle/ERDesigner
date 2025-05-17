@@ -4,6 +4,7 @@
 from PyQt6.QtGui import QColor
 from constants import DEFAULT_TABLE_WIDTH, GRID_SIZE, current_theme_settings # Import necessary constants
 from utils import snap_to_grid # Import utility
+import copy
 
 class Column:
     def __init__(self, name, data_type="TEXT", is_pk=False, is_fk=False, 
@@ -31,6 +32,17 @@ class Column:
                 fk_ref_str = "[FK (incomplete)] " 
         return f"{pk_str}{fk_ref_str}{self.name}: {self.data_type}"
 
+    def __deepcopy__(self, memo):
+        # Columns are relatively simple, default deepcopy might be okay,
+        # but explicit is safer if they ever hold complex objects.
+        # For now, let's assume direct attribute copying is fine.
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            setattr(result, k, copy.deepcopy(v, memo))
+        return result
+
 class Table:
     def __init__(self, name, x=50, y=50, width=DEFAULT_TABLE_WIDTH, 
                  body_color_hex=None, header_color_hex=None): 
@@ -39,7 +51,7 @@ class Table:
         self.x = snap_to_grid(x, GRID_SIZE)
         self.y = snap_to_grid(y, GRID_SIZE)
         self.width = snap_to_grid(width, GRID_SIZE) 
-        self.graphic_item = None 
+        self.graphic_item = None # This should not be deepcopied directly
         
         # Initialize colors based on current theme's defaults, then override if specific hex is given
         self.body_color = QColor(current_theme_settings["default_table_body_color"])
@@ -72,6 +84,24 @@ class Table:
     def __str__(self):
         return self.name
 
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls) # Create new instance without calling __init__
+        memo[id(self)] = result
+
+        # Copy attributes, skipping graphic_item
+        for k, v in self.__dict__.items():
+            if k == 'graphic_item':
+                setattr(result, k, None) # Explicitly set graphic_item to None in the copy
+            elif k == 'body_color' or k == 'header_color': # QColor objects
+                setattr(result, k, QColor(v)) # Create a new QColor instance
+            elif k == 'columns':
+                setattr(result, k, [copy.deepcopy(col, memo) for col in v]) # Deepcopy columns
+            else:
+                setattr(result, k, copy.deepcopy(v, memo)) # Deepcopy other attributes
+        return result
+
+
 class Relationship:
     def __init__(self, table1_name, table2_name, fk_column_name=None, pk_column_name=None, relationship_type="N:1"): 
         self.table1_name = table1_name # Table containing the FK
@@ -79,5 +109,17 @@ class Relationship:
         self.fk_column_name = fk_column_name 
         self.pk_column_name = pk_column_name 
         self.relationship_type = relationship_type 
-        self.graphic_item = None 
+        self.graphic_item = None # This should not be deepcopied directly
         self.manual_bend_offset_x = None
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls) # Create new instance
+        memo[id(self)] = result
+
+        for k, v in self.__dict__.items():
+            if k == 'graphic_item':
+                setattr(result, k, None) # Explicitly set graphic_item to None in the copy
+            else:
+                setattr(result, k, copy.deepcopy(v, memo)) # Deepcopy other attributes
+        return result
