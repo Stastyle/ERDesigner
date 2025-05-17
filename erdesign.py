@@ -8,12 +8,13 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QDialog, QFormLayout,
     QLineEdit, QCheckBox, QComboBox, QMessageBox, QFileDialog,
     QGraphicsItem, QDialogButtonBox, QLabel, QScrollArea, QToolBar, QSizePolicy,
-    QGraphicsSceneHoverEvent, QGraphicsSceneMouseEvent 
+    QGraphicsSceneHoverEvent, QGraphicsSceneMouseEvent, QColorDialog
 )
 from PyQt6.QtCore import Qt, QPointF, QLineF, QRectF, QSize
 from PyQt6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QPainterPath, 
-    QFontMetrics, QIcon, QAction, QPixmap, QTransform, QPainterPathStroker
+    QFontMetrics, QIcon, QAction, QPixmap, QTransform, QPainterPathStroker,
+    QActionGroup 
 )
 
 # --- Constants ---
@@ -33,6 +34,40 @@ CARDINALITY_TEXT_MARGIN = 25
 TABLE_RESIZE_HANDLE_WIDTH = 10
 MIN_TABLE_WIDTH = 120
 
+# Default Theme Colors - These are base values, will be updated by theme selection
+current_theme_settings = {
+    "window_bg": QColor("#e8e8e8"), "view_bg": QColor("#f0f0f0"), "view_border": QColor("#cccccc"),
+    "toolbar_bg": QColor("#dde0e5"), "toolbar_border": QColor("#c0c0c0"),
+    "button_bg": QColor("#f0f2f5"), "button_border": QColor("#b0b5bf"),
+    "button_hover_bg": QColor("#e0e5eb"), "button_pressed_bg": QColor("#c8cce0"),
+    "button_checked_bg": QColor("#b8c0e0"), "button_checked_border": QColor("#8090a0"),
+    "text_color": QColor(Qt.GlobalColor.black), "dialog_text_color": QColor(Qt.GlobalColor.black),
+    "default_table_body_color": QColor(235, 235, 250), 
+    "default_table_header_color": QColor(200, 200, 230),
+}
+
+light_theme = {
+    "window_bg": QColor("#e8e8e8"), "view_bg": QColor("#f8f9fa"), "view_border": QColor("#ced4da"),
+    "toolbar_bg": QColor("#e9ecef"), "toolbar_border": QColor("#ced4da"),
+    "button_bg": QColor("#f8f9fa"), "button_border": QColor("#adb5bd"),
+    "button_hover_bg": QColor("#e9ecef"), "button_pressed_bg": QColor("#dee2e6"),
+    "button_checked_bg": QColor("#cfe2ff"), "button_checked_border": QColor("#9ec5fe"),
+    "text_color": QColor(Qt.GlobalColor.black), "dialog_text_color": QColor(Qt.GlobalColor.black),
+    "default_table_body_color": QColor(235, 235, 250), 
+    "default_table_header_color": QColor(200, 200, 230),
+}
+
+dark_theme = {
+    "window_bg": QColor("#2b2b2b"), "view_bg": QColor("#3c3c3c"), "view_border": QColor("#555555"),
+    "toolbar_bg": QColor("#333333"), "toolbar_border": QColor("#505050"),
+    "button_bg": QColor("#4f4f4f"), "button_border": QColor("#666666"),
+    "button_hover_bg": QColor("#5a5a5a"), "button_pressed_bg": QColor("#646464"),
+    "button_checked_bg": QColor("#4a5a7f"), "button_checked_border": QColor("#6c7ca0"),
+    "text_color": QColor(Qt.GlobalColor.white), "dialog_text_color": QColor(Qt.GlobalColor.white),
+    "default_table_body_color": QColor(60, 63, 65), 
+    "default_table_header_color": QColor(83, 83, 83),
+}
+
 
 # --- Helper function to get standard icons ---
 def get_standard_icon(standard_pixmap, fallback_text=""):
@@ -41,7 +76,7 @@ def get_standard_icon(standard_pixmap, fallback_text=""):
         pm = QPixmap(24,24) 
         pm.fill(Qt.GlobalColor.transparent) 
         painter = QPainter(pm)
-        painter.setPen(QColor(0,0,0)) 
+        painter.setPen(current_theme_settings["text_color"]) 
         painter.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, fallback_text)
         painter.end() 
         return QIcon(pm) 
@@ -78,13 +113,17 @@ class Column:
         return f"{pk_str}{fk_ref_str}{self.name}: {self.data_type}"
 
 class Table:
-    def __init__(self, name, x=50, y=50, width=DEFAULT_TABLE_WIDTH): 
+    def __init__(self, name, x=50, y=50, width=DEFAULT_TABLE_WIDTH, 
+                 body_color_hex=None, header_color_hex=None): 
         self.name = name
         self.columns = []
         self.x = snap_to_grid(x, GRID_SIZE)
         self.y = snap_to_grid(y, GRID_SIZE)
         self.width = snap_to_grid(width, GRID_SIZE) 
         self.graphic_item = None 
+        self.body_color = QColor(body_color_hex) if body_color_hex else QColor(current_theme_settings["default_table_body_color"])
+        self.header_color = QColor(header_color_hex) if header_color_hex else QColor(current_theme_settings["default_table_header_color"])
+
 
     def add_column(self, column):
         self.columns.append(column)
@@ -124,6 +163,8 @@ class RelationshipDialog(QDialog):
         self.relationship_data = relationship_data
         self.main_window_ref = parent_window_ref
         self.setWindowTitle("Relationship Properties")
+        self.setStyleSheet(f"QDialog {{ background-color: {current_theme_settings['window_bg'].name()}; }} QLabel, QComboBox {{ color: {current_theme_settings['dialog_text_color'].name()}; }}")
+
 
         layout = QFormLayout(self)
 
@@ -277,7 +318,7 @@ class OrthogonalRelationshipLine(QGraphicsPathItem):
             elif rel_type == "1:N": card1_symbol, card2_symbol = "1", "N" 
             elif rel_type == "M:N": card1_symbol, card2_symbol = "M", "N" 
 
-            painter.setPen(QColor(30,30,30))
+            painter.setPen(current_theme_settings["text_color"]) 
             font = QFont("Arial", 8, QFont.Weight.Bold)
             painter.setFont(font)
             font_metrics = QFontMetrics(font)
@@ -380,13 +421,35 @@ class TableDialog(QDialog):
         super().__init__(parent_window)
         self.main_window_ref = parent_window 
         self.setWindowTitle("Table Details")
+        self.setStyleSheet(f"QDialog {{ background-color: {current_theme_settings['window_bg'].name()}; }} "
+                           f"QLabel, QCheckBox, QLineEdit, QComboBox {{ color: {current_theme_settings['dialog_text_color'].name()}; }}")
+
         
         self.layout = QVBoxLayout(self)
 
-        self.formLayout = QFormLayout()
+        # Table Name and Color Pickers
+        top_form_layout = QFormLayout()
         self.tableNameInput = QLineEdit(table_name)
-        self.formLayout.addRow("Table Name:", self.tableNameInput)
-        self.layout.addLayout(self.formLayout)
+        top_form_layout.addRow("Table Name:", self.tableNameInput)
+
+        self.bodyColorButton = QPushButton("Body Color")
+        self.bodyColorButton.clicked.connect(self.choose_body_color)
+        table_obj = parent_window.tables_data.get(table_name) if table_name else None
+        self.currentBodyColor = table_obj.body_color if table_obj else QColor(current_theme_settings["default_table_body_color"])
+        self.bodyColorButton.setStyleSheet(f"background-color: {self.currentBodyColor.name()}; color: {get_contrasting_text_color(self.currentBodyColor).name()}; padding: 5px;")
+        
+        self.headerColorButton = QPushButton("Header Color")
+        self.headerColorButton.clicked.connect(self.choose_header_color)
+        self.currentHeaderColor = table_obj.header_color if table_obj else QColor(current_theme_settings["default_table_header_color"])
+        self.headerColorButton.setStyleSheet(f"background-color: {self.currentHeaderColor.name()}; color: {get_contrasting_text_color(self.currentHeaderColor).name()}; padding: 5px;")
+
+        color_button_layout = QHBoxLayout()
+        color_button_layout.addWidget(self.bodyColorButton)
+        color_button_layout.addWidget(self.headerColorButton)
+        top_form_layout.addRow(color_button_layout)
+        
+        self.layout.addLayout(top_form_layout)
+
 
         self.columnsLabel = QLabel("Columns:")
         self.layout.addWidget(self.columnsLabel)
@@ -424,16 +487,37 @@ class TableDialog(QDialog):
         self.setMinimumSize(750, 450) 
         # self.update_move_button_states() # Removed
 
+    def choose_body_color(self):
+        color = QColorDialog.getColor(self.currentBodyColor, self, "Choose Table Body Color")
+        if color.isValid():
+            self.currentBodyColor = color
+            self.bodyColorButton.setStyleSheet(f"background-color: {self.currentBodyColor.name()}; color: {get_contrasting_text_color(self.currentBodyColor).name()}; padding: 5px;")
+
+    def choose_header_color(self):
+        color = QColorDialog.getColor(self.currentHeaderColor, self, "Choose Table Header Color")
+        if color.isValid():
+            self.currentHeaderColor = color
+            self.headerColorButton.setStyleSheet(f"background-color: {self.currentHeaderColor.name()}; color: {get_contrasting_text_color(self.currentHeaderColor).name()}; padding: 5px;")
+
 
     def on_add_column_button_clicked(self):
-        stretch_item = self.columnsLayout.itemAt(self.columnsLayout.count() - 1) 
-        if stretch_item:
-             self.columnsLayout.takeAt(self.columnsLayout.count() -1) 
+        # Remove the stretch item before adding a new row
+        stretch_item = self.columnsLayout.takeAt(self.columnsLayout.count() - 1)
         
         self.add_column_input_row(add_to_layout=True) 
         
-        if stretch_item: 
-            self.columnsLayout.addStretch(1) 
+        # Re-add the stretch item at the very end
+        if stretch_item: # Check if stretch_item is not None (it might be if layout was empty)
+            # If it was a layout (QVBoxLayout containing a stretch), add it back
+            if isinstance(stretch_item.layout(), QVBoxLayout): 
+                 self.columnsLayout.addLayout(stretch_item.layout())
+            elif stretch_item.spacerItem(): # If it was just a spacer item
+                 self.columnsLayout.addStretch(1)
+            # else: # Fallback if it was something else, just add a new stretch
+            #    self.columnsLayout.addStretch(1)
+        else: # If no stretch item was found (e.g., layout was empty before adding first real item)
+            self.columnsLayout.addStretch(1)
+
         # self.update_move_button_states() # Removed
 
 
@@ -451,7 +535,7 @@ class TableDialog(QDialog):
 
         font_metrics = QFontMetrics(self.font()) 
         button_height = font_metrics.height() + 4 
-        button_width_char = font_metrics.horizontalAdvance("X") + 8 
+        button_width_char = font_metrics.horizontalAdvance("X") + 10 
 
         name_edit = QLineEdit(name)
         name_edit.setPlaceholderText("Column Name")
@@ -480,26 +564,26 @@ class TableDialog(QDialog):
         top_row_h_layout.addWidget(type_combo, 1)
         top_row_h_layout.addWidget(pk_checkbox)
         top_row_h_layout.addWidget(fk_checkbox)
+        top_row_h_layout.addStretch(1) # Add stretch to push remove button to the right
         top_row_h_layout.addWidget(btn_remove_col)
         main_row_v_layout.addWidget(top_row_widget)
 
         fk_details_widget = QWidget()
         fk_details_layout = QHBoxLayout(fk_details_widget) 
-        fk_details_layout.setContentsMargins(40, 2, 5, 2) 
+        fk_details_layout.setContentsMargins(20, 2, 5, 2) # Indent FK details, keep left margin
         fk_details_layout.setSpacing(5)
 
         ref_table_combo = QComboBox()
         ref_table_combo.setPlaceholderText("Referenced Table")
-        # ref_table_combo.addItem("") # Removed: No empty selection if table is chosen
+        # ref_table_combo.addItem("") # No empty item if a table must be selected
         current_table_name_being_edited = self.tableNameInput.text()
         for t_name in self.main_window_ref.tables_data.keys():
             if t_name != current_table_name_being_edited:
                  ref_table_combo.addItem(t_name)
         if ref_table_name:
             ref_table_combo.setCurrentText(ref_table_name)
-        else: # Auto-select first table if any
-            if ref_table_combo.count() > 0:
-                ref_table_combo.setCurrentIndex(0)
+        elif ref_table_combo.count() > 0 : # Auto-select first if list is not empty
+             ref_table_combo.setCurrentIndex(0)
 
         
         ref_col_combo = QComboBox()
@@ -516,7 +600,7 @@ class TableDialog(QDialog):
         fk_details_layout.addWidget(ref_col_combo,1)
         fk_details_layout.addWidget(fk_rel_type_label,0, Qt.AlignmentFlag.AlignRight) 
         fk_details_layout.addWidget(fk_rel_type_combo,1)
-        fk_details_layout.addStretch(1) 
+        # fk_details_layout.addStretch(1) # No stretch here, let it be compact
         
         fk_details_widget.setVisible(is_fk) 
         main_row_v_layout.addWidget(fk_details_widget)
@@ -627,7 +711,12 @@ class TableDialog(QDialog):
                 fk_rel_type = "N:1" 
             if name: 
                 columns.append(Column(name, data_type, is_pk, is_fk, ref_table, ref_col, fk_rel_type))
-        return table_name, columns
+        
+        # Get table colors
+        body_color = self.currentBodyColor.name()
+        header_color = self.currentHeaderColor.name()
+        return table_name, columns, body_color, header_color
+
 
 # --- Graphical Representation of a Table ---
 class TableGraphicItem(QGraphicsItem):
@@ -673,7 +762,7 @@ class TableGraphicItem(QGraphicsItem):
         body_rect = QRectF(0, 0, self.width, self.height)
         path = QPainterPath()
         path.addRoundedRect(body_rect, 7, 7) 
-        painter.setBrush(QBrush(QColor(235, 235, 250))) 
+        painter.setBrush(QBrush(self.table_data.body_color)) # Use custom body color
         if self.isSelected():
             painter.setPen(QPen(QColor(100, 100, 200), 2.5)) 
         else:
@@ -681,15 +770,20 @@ class TableGraphicItem(QGraphicsItem):
         painter.drawPath(path)
 
         header_rect = QRectF(0, 0, self.width, self.header_height)
-        painter.setBrush(QBrush(QColor(200, 200, 230))) 
+        painter.setBrush(QBrush(self.table_data.header_color)) # Use custom header color
         painter.drawRect(header_rect) 
         
-        painter.setPen(Qt.GlobalColor.black)
+        # Determine text color based on header background for contrast
+        header_text_color = get_contrasting_text_color(self.table_data.header_color)
+        painter.setPen(header_text_color)
         font = QFont("Arial", 10, QFont.Weight.Bold)
         painter.setFont(font)
         painter.drawText(header_rect.adjusted(self.padding, 0, -self.padding, 0), 
                          Qt.AlignmentFlag.AlignCenter, self.table_data.name)
 
+        # Determine text color for columns based on body background
+        column_text_color = get_contrasting_text_color(self.table_data.body_color)
+        painter.setPen(column_text_color)
         col_font = QFont("Arial", 9) 
         painter.setFont(col_font)
         
@@ -710,7 +804,7 @@ class TableGraphicItem(QGraphicsItem):
             if column_idx < len(self.table_data.columns) - 1: 
                  painter.setPen(QPen(QColor(210,210,220), 0.8)) 
                  painter.drawLine(QPointF(self.padding / 2, current_y), QPointF(self.width - self.padding/2, current_y))
-                 painter.setPen(QPen(Qt.GlobalColor.black, 1)) 
+                 painter.setPen(column_text_color) # Reset pen to column text color
         
         # Draw resize handle if selected
         if self.isSelected():
@@ -847,10 +941,15 @@ class TableGraphicItem(QGraphicsItem):
 
         dialog = TableDialog(main_window, self.table_data.name, old_columns_copy) # Pass copy
         if dialog.exec():
-            new_name, new_columns_data = dialog.get_table_data()
+            new_name, new_columns_data, body_color_hex, header_color_hex = dialog.get_table_data() # Get colors
             if not new_name:
                 QMessageBox.warning(main_window, "Warning", "Table name cannot be empty.")
                 return
+
+            # Update table colors
+            self.table_data.body_color = QColor(body_color_hex)
+            self.table_data.header_color = QColor(header_color_hex)
+
 
             # --- Handle Table Rename ---
             if new_name != old_table_name:
@@ -1087,7 +1186,11 @@ class ERDCanvasWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_file_path = None
-        self.update_window_title() # Set initial title
+        self.current_theme = "light" # Default theme
+        self.user_default_table_body_color = None
+        self.user_default_table_header_color = None
+        self.update_theme_settings() # Apply initial theme defaults
+        self.update_window_title() 
 
         self.setGeometry(100, 100, 1300, 850) 
 
@@ -1103,7 +1206,6 @@ class ERDCanvasWindow(QMainWindow):
         self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag) 
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse) 
         self.view.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter) 
-        self.view.setStyleSheet("background-color: #f0f0f0; border: 1px solid #cccccc;")
         self.view.setInteractive(True) 
         self.view.wheelEvent = self.view_wheel_event
 
@@ -1111,14 +1213,54 @@ class ERDCanvasWindow(QMainWindow):
         main_widget = QWidget()
         main_layout = QHBoxLayout(main_widget) 
 
-        self.create_toolbar() 
+        self.create_toolbar_and_menus() # Renamed for clarity
         main_layout.addWidget(self.toolbar) 
 
         main_layout.addWidget(self.view, 1) 
         self.setCentralWidget(main_widget)
 
         print("Main window created.")
-        self.apply_styles()
+        self.apply_styles() # Apply initial styles based on theme
+
+    def update_theme_settings(self):
+        """Updates the global current_theme_settings based on self.current_theme"""
+        global current_theme_settings # Allow modification of the global dict
+        if self.current_theme == "dark":
+            current_theme_settings = dark_theme.copy() # Use a copy to avoid modifying the original
+        else: # Default to light theme (includes "system" for now)
+            current_theme_settings = light_theme.copy()
+        
+        # Apply user-defined defaults if they exist
+        if self.user_default_table_body_color:
+            current_theme_settings["default_table_body_color"] = self.user_default_table_body_color
+        if self.user_default_table_header_color:
+            current_theme_settings["default_table_header_color"] = self.user_default_table_header_color
+
+
+    def set_theme(self, theme_name):
+        self.current_theme = theme_name
+        self.update_theme_settings()
+        self.apply_styles() # Re-apply stylesheet
+        # Update existing tables to new theme defaults if they were using old defaults
+        for table_data in self.tables_data.values():
+            # If table color is one of the old defaults, update to new default
+            # This logic is a bit simplistic and assumes user hasn't picked a color identical to an old default
+            if theme_name == "dark":
+                if table_data.body_color == light_theme["default_table_body_color"]:
+                    table_data.body_color = QColor(current_theme_settings["default_table_body_color"])
+                if table_data.header_color == light_theme["default_table_header_color"]:
+                    table_data.header_color = QColor(current_theme_settings["default_table_header_color"])
+            else: # Switching to light
+                if table_data.body_color == dark_theme["default_table_body_color"]:
+                    table_data.body_color = QColor(current_theme_settings["default_table_body_color"])
+                if table_data.header_color == dark_theme["default_table_header_color"]:
+                    table_data.header_color = QColor(current_theme_settings["default_table_header_color"])
+
+            if table_data.graphic_item:
+                table_data.graphic_item.update()
+        self.scene.update() # Redraw scene background if needed
+        print(f"Theme set to: {theme_name}")
+
 
     def update_window_title(self):
         title = "ERD Design Tool"
@@ -1139,37 +1281,58 @@ class ERDCanvasWindow(QMainWindow):
 
 
     def apply_styles(self):
-        self.setStyleSheet("""
-            QMainWindow { background-color: #e8e8e8; }
-            QToolBar {
-                background-color: #dde0e5; border: 1px solid #c0c0c0;
+        # Use colors from current_theme_settings
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {current_theme_settings['window_bg'].name()};
+            }}
+            QToolBar {{
+                background-color: {current_theme_settings['toolbar_bg'].name()};
+                border: 1px solid {current_theme_settings['toolbar_border'].name()};
                 padding: 5px; spacing: 8px; min-width: 180px; 
-            }
-            QToolBar QToolButton { 
-                background-color: #f0f2f5; border: 1px solid #b0b5bf;
+            }}
+            QToolBar QToolButton {{ 
+                background-color: {current_theme_settings['button_bg'].name()};
+                border: 1px solid {current_theme_settings['button_border'].name()};
                 border-radius: 4px; padding: 8px 5px; margin: 2px;
-                min-width: 150px; 
-                text-align: left; 
-            }
-            QToolBar QToolButton:hover { background-color: #e0e5eb; }
-            QToolBar QToolButton:pressed { background-color: #c8cce0; }
-            QToolBar QToolButton:checked { background-color: #b8c0e0; border: 1px solid #8090a0; }
-            QPushButton { 
-                background-color: #f0f2f5; border: 1px solid #b0b5bf;
+                min-width: 150px; text-align: left; 
+                color: {current_theme_settings['text_color'].name()};
+            }}
+            QToolBar QToolButton:hover {{ background-color: {current_theme_settings['button_hover_bg'].name()}; }}
+            QToolBar QToolButton:pressed {{ background-color: {current_theme_settings['button_pressed_bg'].name()}; }}
+            QToolBar QToolButton:checked {{ 
+                background-color: {current_theme_settings['button_checked_bg'].name()}; 
+                border: 1px solid {current_theme_settings['button_checked_border'].name()};
+            }}
+            QPushButton {{ 
+                background-color: {current_theme_settings['button_bg'].name()};
+                border: 1px solid {current_theme_settings['button_border'].name()};
                 border-radius: 4px; padding: 5px 10px; min-width: 80px;
-            }
-            QPushButton:hover { background-color: #e0e5eb; }
-            QPushButton:pressed { background-color: #d0d0d0; }
-            QComboBox, QLineEdit {
-                border: 1px solid #c0c0c0; border-radius: 3px;
-                padding: 3px; min-height: 20px; 
-            }
-            QScrollArea { border: 1px solid #d0d0d0; }
-            QLabel { padding: 2px; }
+                color: {current_theme_settings['text_color'].name()};
+            }}
+            QPushButton:hover {{ background-color: {current_theme_settings['button_hover_bg'].name()}; }}
+            QPushButton:pressed {{ background-color: {current_theme_settings['button_pressed_bg'].name()}; }}
+            QComboBox, QLineEdit {{
+                border: 1px solid {current_theme_settings['button_border'].name()}; 
+                border-radius: 3px; padding: 3px; min-height: 20px; 
+                background-color: {current_theme_settings['view_bg'].name()}; /* Match view for input fields */
+                color: {current_theme_settings['text_color'].name()};
+            }}
+            QComboBox QAbstractItemView {{ /* Dropdown list part of ComboBox */
+                background-color: {current_theme_settings['view_bg'].name()};
+                color: {current_theme_settings['text_color'].name()};
+                selection-background-color: {current_theme_settings['button_checked_bg'].name()};
+            }}
+            QScrollArea {{ border: 1px solid {current_theme_settings['toolbar_border'].name()}; }}
+            QLabel {{ padding: 2px; color: {current_theme_settings['dialog_text_color'].name()}; }}
+            QDialog {{ background-color: {current_theme_settings['window_bg'].name()}; }}
         """)
+        self.view.setStyleSheet(f"background-color: {current_theme_settings['view_bg'].name()}; border: 1px solid {current_theme_settings['view_border'].name()};")
+        self.scene.setBackgroundBrush(QBrush(current_theme_settings['view_bg']))
 
 
-    def create_toolbar(self):
+    def create_toolbar_and_menus(self): # Renamed
+        # --- Toolbar ---
         self.toolbar = QToolBar("Main Toolbar")
         self.toolbar.setMovable(False) 
         self.toolbar.setOrientation(Qt.Orientation.Vertical) 
@@ -1177,38 +1340,118 @@ class ERDCanvasWindow(QMainWindow):
         self.toolbar.setIconSize(QSize(24,24)) 
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, self.toolbar)
 
-        # New File Action
-        actionNew = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_FileIcon, "New"), "New Diagram", self)
+        actionNew = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_FileIcon, "New"), "&New Diagram", self)
         actionNew.triggered.connect(self.new_diagram)
         self.toolbar.addAction(actionNew)
 
         self.toolbar.addSeparator()
 
-        # Save Action
-        actionSave = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DialogSaveButton, "Save"), "Save", self)
+        actionSave = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DialogSaveButton, "Save"), "&Save", self)
+        actionSave.setShortcut("Ctrl+S")
         actionSave.triggered.connect(self.save_file)
         self.toolbar.addAction(actionSave)
         
-        # Save As (was Export CSV) Action
-        actionSaveAs = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DriveHDIcon, "Save As"), "Save As...", self) 
+        actionSaveAs = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DriveHDIcon, "Save As"), "Save &As...", self) 
         actionSaveAs.triggered.connect(self.save_file_as)
         self.toolbar.addAction(actionSaveAs)
 
-        # Import CSV Action
-        actionImportCSV = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowDown, "Import"), "Import CSV", self)
+        actionImportCSV = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowDown, "Import"), "&Import CSV", self)
+        actionImportCSV.setShortcut("Ctrl+O")
         actionImportCSV.triggered.connect(self.handle_import_csv_button)
         self.toolbar.addAction(actionImportCSV)
         
         self.toolbar.addSeparator()
 
-        self.actionAddTable = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_FileDialogNewFolder, "Add Tbl"), "Add Table", self)
+        self.actionAddTable = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_FileDialogNewFolder, "Add Tbl"), "Add &Table", self)
         self.actionAddTable.triggered.connect(lambda: self.handle_add_table_button()) 
         self.toolbar.addAction(self.actionAddTable)
         
-        self.actionDrawRelationship = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowForward, "Link"), "Draw Relationship", self)
+        self.actionDrawRelationship = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowForward, "Link"), "&Draw Relationship", self)
         self.actionDrawRelationship.setCheckable(True)
         self.actionDrawRelationship.triggered.connect(self.toggle_relationship_mode_action)
         self.toolbar.addAction(self.actionDrawRelationship)
+
+        # --- Menus ---
+        menubar = self.menuBar()
+        fileMenu = menubar.addMenu("&File")
+        fileMenu.addAction(actionNew)
+        fileMenu.addAction(actionSave)
+        fileMenu.addAction(actionSaveAs)
+        fileMenu.addAction(actionImportCSV)
+        fileMenu.addSeparator()
+        actionExit = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DialogCloseButton, "Exit"), "E&xit", self)
+        actionExit.triggered.connect(self.close)
+        fileMenu.addAction(actionExit)
+
+        viewMenu = menubar.addMenu("&View")
+        themeMenu = viewMenu.addMenu("&Theme")
+        
+        lightThemeAction = QAction("Light", self, checkable=True)
+        lightThemeAction.setChecked(self.current_theme == "light")
+        lightThemeAction.triggered.connect(lambda: self.set_theme("light"))
+        themeMenu.addAction(lightThemeAction)
+
+        darkThemeAction = QAction("Dark", self, checkable=True)
+        darkThemeAction.setChecked(self.current_theme == "dark")
+        darkThemeAction.triggered.connect(lambda: self.set_theme("dark"))
+        themeMenu.addAction(darkThemeAction)
+        
+        # Action Group for themes
+        theme_action_group = QActionGroup(self)
+        theme_action_group.addAction(lightThemeAction)
+        theme_action_group.addAction(darkThemeAction)
+        theme_action_group.setExclusive(True)
+
+
+        settingsMenu = menubar.addMenu("&Settings")
+        actionDefaultColors = QAction("Default Table Colors...", self)
+        actionDefaultColors.triggered.connect(self.open_default_colors_dialog)
+        settingsMenu.addAction(actionDefaultColors)
+
+
+    def open_default_colors_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Set Default Table Colors")
+        dialog.setStyleSheet(f"QDialog {{ background-color: {current_theme_settings['window_bg'].name()}; }} QLabel, QPushButton {{ color: {current_theme_settings['dialog_text_color'].name()}; }}")
+
+        layout = QFormLayout(dialog)
+
+        body_button = QPushButton(f"Body: {self.user_default_table_body_color.name() if self.user_default_table_body_color else current_theme_settings['default_table_body_color'].name()}")
+        body_button.setStyleSheet(f"background-color: {(self.user_default_table_body_color or current_theme_settings['default_table_body_color']).name()}; color: {get_contrasting_text_color(self.user_default_table_body_color or current_theme_settings['default_table_body_color']).name()}; padding: 5px;")
+        
+        header_button = QPushButton(f"Header: {self.user_default_table_header_color.name() if self.user_default_table_header_color else current_theme_settings['default_table_header_color'].name()}")
+        header_button.setStyleSheet(f"background-color: {(self.user_default_table_header_color or current_theme_settings['default_table_header_color']).name()}; color: {get_contrasting_text_color(self.user_default_table_header_color or current_theme_settings['default_table_header_color']).name()}; padding: 5px;")
+
+        def pick_body():
+            color = QColorDialog.getColor(self.user_default_table_body_color or current_theme_settings['default_table_body_color'], self)
+            if color.isValid():
+                self.user_default_table_body_color = color
+                body_button.setText(f"Body: {color.name()}")
+                body_button.setStyleSheet(f"background-color: {color.name()}; color: {get_contrasting_text_color(color).name()}; padding: 5px;")
+                self.update_theme_settings() 
+                self.set_theme(self.current_theme) 
+
+        def pick_header():
+            color = QColorDialog.getColor(self.user_default_table_header_color or current_theme_settings['default_table_header_color'], self)
+            if color.isValid():
+                self.user_default_table_header_color = color
+                header_button.setText(f"Header: {color.name()}")
+                header_button.setStyleSheet(f"background-color: {color.name()}; color: {get_contrasting_text_color(color).name()}; padding: 5px;")
+                self.update_theme_settings()
+                self.set_theme(self.current_theme)
+
+
+        body_button.clicked.connect(pick_body)
+        header_button.clicked.connect(pick_header)
+
+        layout.addRow("Default Table Body Color:", body_button)
+        layout.addRow("Default Table Header Color:", header_button)
+        
+        buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttonBox.accepted.connect(dialog.accept)
+        layout.addWidget(buttonBox)
+        dialog.exec()
+
 
     def new_diagram(self):
         # Optional: Add a confirmation dialog if there are unsaved changes
@@ -1260,7 +1503,7 @@ class ERDCanvasWindow(QMainWindow):
             print("Relationship drawing mode: Off.")
 
 
-    def handle_add_table_button(self, table_name_prop=None, columns_prop=None, pos=None, width_prop=None): # Added width_prop
+    def handle_add_table_button(self, table_name_prop=None, columns_prop=None, pos=None, width_prop=None, body_color_hex=None, header_color_hex=None): # Added color_props
         if table_name_prop: 
             table_name = table_name_prop
             columns = columns_prop
@@ -1271,7 +1514,7 @@ class ERDCanvasWindow(QMainWindow):
         else: 
             dialog = TableDialog(self, table_name_prop if table_name_prop else "") 
             if not dialog.exec(): return None 
-            table_name, columns = dialog.get_table_data()
+            table_name, columns, body_color_hex, header_color_hex = dialog.get_table_data() # Get colors
             if not table_name:
                 QMessageBox.warning(self, "Warning", "Table name cannot be empty.")
                 return None
@@ -1288,7 +1531,9 @@ class ERDCanvasWindow(QMainWindow):
             default_y = snap_to_grid(visible_rect.center().y() - TABLE_HEADER_HEIGHT / 2, GRID_SIZE)
 
         table_width = width_prop if width_prop is not None else DEFAULT_TABLE_WIDTH
-        new_table_data = Table(table_name, x=default_x, y=default_y, width=table_width) 
+        new_table_data = Table(table_name, x=default_x, y=default_y, width=table_width, 
+                               body_color_hex=body_color_hex, header_color_hex=header_color_hex)
+        
         for col in columns: new_table_data.add_column(col)
         
         self.tables_data[table_name] = new_table_data
@@ -1333,7 +1578,8 @@ class ERDCanvasWindow(QMainWindow):
                         
                         if table_name_csv == "": continue
                         if table_name_csv not in parsed_tables:
-                            parsed_tables[table_name_csv] = {"columns": [], "pos": None, "width": DEFAULT_TABLE_WIDTH}
+                            # Initialize with default width and colors, will be overridden by TABLE_DEFINITIONS if present
+                            parsed_tables[table_name_csv] = {"columns": [], "pos": None, "width": DEFAULT_TABLE_WIDTH, "body_color": None, "header_color": None}
                         
                         if col_name_csv == "N/A (No Columns)" or col_name_csv == "":
                             continue 
@@ -1348,17 +1594,22 @@ class ERDCanvasWindow(QMainWindow):
                         parsed_tables[table_name_csv]["columns"].append(column)
 
                     elif current_section == "TABLE_DEFINITIONS": 
-                        if len(row) < 5: continue 
+                        if len(row) < 7: continue # Marker, Name, X, Y, Width, BodyColor, HeaderColor
                         table_name_def = row[1].strip()
                         try:
                             x_pos = float(row[2].strip())
                             y_pos = float(row[3].strip())
                             width_val = float(row[4].strip()) if len(row) > 4 and row[4].strip() else DEFAULT_TABLE_WIDTH
+                            body_color_hex = row[5].strip() if len(row) > 5 and row[5].strip() else None
+                            header_color_hex = row[6].strip() if len(row) > 6 and row[6].strip() else None
+
                             if table_name_def in parsed_tables:
                                 parsed_tables[table_name_def]["pos"] = QPointF(x_pos, y_pos)
                                 parsed_tables[table_name_def]["width"] = width_val
+                                parsed_tables[table_name_def]["body_color"] = body_color_hex
+                                parsed_tables[table_name_def]["header_color"] = header_color_hex
                             else: 
-                                parsed_tables[table_name_def] = {"columns": [], "pos": QPointF(x_pos, y_pos), "width": width_val}
+                                parsed_tables[table_name_def] = {"columns": [], "pos": QPointF(x_pos, y_pos), "width": width_val, "body_color": body_color_hex, "header_color": header_color_hex}
                         except ValueError:
                             print(f"Warning: Could not parse definition for table '{table_name_def}'")
                     
@@ -1386,12 +1637,17 @@ class ERDCanvasWindow(QMainWindow):
                 cols_to_import = data["columns"]
                 table_pos = data.get("pos") 
                 table_width = data.get("width", DEFAULT_TABLE_WIDTH)
+                body_color_h = data.get("body_color")
+                header_color_h = data.get("header_color")
+
 
                 created_table_data = self.handle_add_table_button(
                     table_name_prop=table_name_to_import, 
                     columns_prop=cols_to_import, 
                     pos=table_pos,
-                    width_prop=table_width
+                    width_prop=table_width,
+                    body_color_hex=body_color_h, # Pass colors
+                    header_color_hex=header_color_h
                 )
                 if created_table_data:
                     imported_tables_count += 1
@@ -1471,11 +1727,12 @@ class ERDCanvasWindow(QMainWindow):
                                              col.references_column if col.is_fk else "",
                                              col.fk_relationship_type if col.is_fk else ""]) 
                 
-                # Section 2: Table Definitions (Name, X, Y, Width)
+                # Section 2: Table Definitions (Name, X, Y, Width, BodyColor, HeaderColor)
                 writer.writerow([]) 
-                writer.writerow([CSV_TABLE_POSITION_MARKER, "Table Name", "X", "Y", "Width"])
+                writer.writerow([CSV_TABLE_POSITION_MARKER, "Table Name", "X", "Y", "Width", "Body Color HEX", "Header Color HEX"])
                 for table_name, table_obj in self.tables_data.items():
-                    writer.writerow([CSV_TABLE_POSITION_MARKER, table_name, table_obj.x, table_obj.y, table_obj.width])
+                    writer.writerow([CSV_TABLE_POSITION_MARKER, table_name, table_obj.x, table_obj.y, table_obj.width,
+                                     table_obj.body_color.name(), table_obj.header_color.name()])
 
                 # Section 3: Explicit Relationship Definitions (for types, manual bends etc.)
                 if self.relationships_data:
@@ -1742,6 +1999,16 @@ class ERDCanvasWindow(QMainWindow):
             if table_name_to_delete in self.tables_data: del self.tables_data[table_name_to_delete]
             print(f"Table '{table_name_to_delete}' deleted.")
         self.scene.update()
+
+# --- Helper function for contrasting text color ---
+def get_contrasting_text_color(bg_color):
+    """Returns black or white based on the background color's luminance."""
+    if not isinstance(bg_color, QColor):
+        return QColor(Qt.GlobalColor.black) # Default if color is invalid
+    # Calculate luminance (standard formula)
+    luminance = (0.299 * bg_color.red() + 0.587 * bg_color.green() + 0.114 * bg_color.blue()) / 255
+    return QColor(Qt.GlobalColor.black) if luminance > 0.5 else QColor(Qt.GlobalColor.white)
+
 
 # --- Running the Application ---
 if __name__ == '__main__':

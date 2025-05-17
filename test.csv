@@ -1,0 +1,22 @@
+﻿Table Name,Column Name,Data Type,Is Primary Key,Is Foreign Key,References Table,References Column,FK Relationship Type
+Structure,Name,TEXT,No,No,,,
+Structure,ID,TEXT,Yes,No,,,
+Structure,type,TEXT,No,No,,,
+Structure,notes,TEXT,No,No,,,
+Item,Name,TEXT,No,No,,,
+Item,ID,TEXT,Yes,No,,,
+Item,StructureLookup,TEXT,No,Yes,Structure,ID,N:1
+Chapter,Name,TEXT,No,No,,,
+Chapter,ID,TEXT,Yes,No,,,
+Chapter,structure name,TEXT,No,Yes,Structure,ID,N:1
+Chapter,item name,TEXT,No,Yes,Item,ID,N:1
+
+TABLE_POSITION,Table Name,X,Y,Width,Body Color HEX,Header Color HEX
+TABLE_POSITION,Structure,1440.0,1580.0,200,#ebebfa,#c8c8e6
+TABLE_POSITION,Item,1880.0,1380.0,200,#ebebfa,#c8c8e6
+TABLE_POSITION,Chapter,1440.0,1140.0,200,#ebebfa,#c8c8e6
+
+RELATIONSHIP_DEF,From Table (FK Source),FK Column,To Table (PK Source),PK Column,Relationship Type,Manual Bend X Offset
+RELATIONSHIP_DEF,Item,StructureLookup,Structure,ID,N:1,
+RELATIONSHIP_DEF,Chapter,structure name,Structure,ID,N:1,1380.0
+RELATIONSHIP_DEF,Chapter,item name,Item,ID,N:1,
