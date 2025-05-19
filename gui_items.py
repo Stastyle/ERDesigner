@@ -1,5 +1,5 @@
 # gui_items.py
-# Version: 20250518.0602
+# Version: 20250519.01
 # Contains QGraphicsItem subclasses for representing tables, relationships, and groups.
 
 import math
@@ -677,6 +677,7 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
         )
 
         if not reconstructed_drawn_segments_scene:
+            # print("DEBUG: find_segment_for_new_bend - No segments from _get_path_segments_from_definition.")
             return -1, -1, False
 
         closest_hit_drawn_segment_idx = -1
@@ -749,50 +750,34 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
                    closest_hit_drawn_segment_idx < current_drawn_segment_counter + num_drawn_segments_for_this_logical_segment:
 
                     cmd_insert_idx = 0
-                    if not self.relationship_data.anchor_points: # No anchors yet, new bend is first
+                    if not self.relationship_data.anchor_points:
                         cmd_insert_idx = 0
                     else:
-                        # Determine insertion index based on which logical segment was hit
-                        # This logic needs to be robust.
-                        # If the hit segment is defined by (start_point, anchors[0]), insert at 0.
-                        # If by (anchors[i], anchors[i+1]) where i is even (B_k to A_{k+1}), insert at i+2.
-                        # If by (anchors[len-1], end_point), insert at len(anchors).
-
-                        # Simplified: find which anchor pair we are "before" or "after"
-                        # This is complex because a logical segment can be made of 1 or 2 drawn segments.
-                        # For now, using a placeholder. This is a known area for improvement.
-                        # The `insert_at_anchor_index_for_command` is the index in the `anchor_points` list.
-                        # It should be an even number.
                         point_after_clicked_segment_start = reconstructed_drawn_segments_scene[closest_hit_drawn_segment_idx][0]
                         
-                        temp_idx = 0
                         found = False
                         if point_after_clicked_segment_start == self.start_attachment_point:
                             cmd_insert_idx = 0
                             found = True
                         else:
                             for anchor_idx in range(0, len(self.relationship_data.anchor_points), 2):
-                                # If click is on segment leading to A_k (anchors[anchor_idx])
-                                # or on segment A_k to B_k (anchors[anchor_idx] to anchors[anchor_idx+1])
-                                # then new bend should be inserted *before* A_k
                                 if point_after_clicked_segment_start == self.relationship_data.anchor_points[anchor_idx]:
                                      cmd_insert_idx = anchor_idx
                                      found = True
                                      break
-                                # If click is on segment leading to B_k (anchors[anchor_idx+1])
                                 if anchor_idx + 1 < len(self.relationship_data.anchor_points):
                                     if point_after_clicked_segment_start == self.relationship_data.anchor_points[anchor_idx+1]:
-                                        cmd_insert_idx = anchor_idx + 2 # Insert after this pair
+                                        cmd_insert_idx = anchor_idx + 2
                                         found = True
                                         break
-                        if not found: # Clicked segment leading to end_point
+                        if not found:
                             cmd_insert_idx = len(self.relationship_data.anchor_points)
 
 
                     return logical_segment_start_idx, cmd_insert_idx, is_hit_segment_horizontal_orientation
 
                 current_drawn_segment_counter += num_drawn_segments_for_this_logical_segment
-            return -1,-1, False # Should not be reached if logic is correct
+            return -1,-1, False
         return -1, -1, False
 
 
@@ -804,11 +789,9 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
         p_click_scene = self.mapToScene(p_click_item)
 
         if not (0 <= insert_at_anchor_index_for_command <= len(self.relationship_data.anchor_points) and insert_at_anchor_index_for_command % 2 == 0):
-            # print(f"Error: Invalid insert_at_anchor_index_for_command: {insert_at_anchor_index_for_command}. Must be even and within bounds.")
-            # Attempt to recover or default
             if insert_at_anchor_index_for_command < 0: insert_at_anchor_index_for_command = 0
             elif insert_at_anchor_index_for_command > len(self.relationship_data.anchor_points): insert_at_anchor_index_for_command = len(self.relationship_data.anchor_points)
-            if insert_at_anchor_index_for_command % 2 != 0: # If odd, make it previous even (or 0)
+            if insert_at_anchor_index_for_command % 2 != 0:
                 insert_at_anchor_index_for_command = max(0, insert_at_anchor_index_for_command -1)
 
 
@@ -1070,8 +1053,10 @@ class GroupGraphicItem(QGraphicsRectItem):
         self._resizing_edge = None
         self._resize_start_mouse_pos = QPointF()
         self._initial_rect_on_resize = QRectF()
-        self._move_start_pos_group = QPointF()
-        self._initial_table_positions_on_move = {}
+        self._move_start_pos_group = QPointF() # This will store the group's scenePos at move start
+        self._initial_table_positions_on_move = {} # {table_name: scenePos_of_table}
+        # For visual drag feedback:
+        self._initial_table_offsets_from_group = {} # {table_name: offset_from_group_origin_at_press}
 
 
     def get_resize_handle_rects(self) -> dict[Qt.Edge, QRectF]:
@@ -1152,33 +1137,52 @@ class GroupGraphicItem(QGraphicsRectItem):
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         main_window = self.scene().main_window if self.scene() else None
 
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange and self.scene():
-            pass # Visual move handled by Qt, command created on ItemPositionHasChanged
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange and self.scene() and main_window:
+            proposed_new_group_scene_pos = value # This is the new scenePos Qt wants to set for the group
+
+            # Update visual positions of contained tables during drag for immediate feedback
+            if hasattr(self, '_initial_table_offsets_from_group') and self._initial_table_offsets_from_group:
+                # print(f"DEBUG GuiItem ItemPositionChange (Drag): Group '{self.group_data.name}' proposed new scenePos: {proposed_new_group_scene_pos}")
+                for table_name, offset in self._initial_table_offsets_from_group.items():
+                    table_data = main_window.tables_data.get(table_name)
+                    if table_data and table_data.graphic_item:
+                        new_table_scene_pos = proposed_new_group_scene_pos + offset
+                        # print(f"DEBUG GuiItem ItemPositionChange (Drag): Moving table '{table_name}' visually to {new_table_scene_pos}")
+                        table_data.graphic_item.setPos(new_table_scene_pos)
+                        if hasattr(self.scene(), 'update_relationships_for_table'):
+                            self.scene().update_relationships_for_table(table_data.name)
+            return value # Allow Qt to continue moving the group item itself
 
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged and main_window:
             from commands import MoveGroupCommand
-            current_pos_snapped = QPointF(snap_to_grid(self.pos().x(), GRID_SIZE),
-                                          snap_to_grid(self.pos().y(), GRID_SIZE))
+            final_snapped_group_pos = QPointF(snap_to_grid(self.pos().x(), GRID_SIZE),
+                                              snap_to_grid(self.pos().y(), GRID_SIZE))
 
-            if current_pos_snapped != self.pos():
-                self.setPos(current_pos_snapped)
+            if final_snapped_group_pos != self.pos():
+                self.setPos(final_snapped_group_pos)
 
-            if self._move_start_pos_group.isNull() or current_pos_snapped == self._move_start_pos_group:
-                self._move_start_pos_group = QPointF()
-                self._initial_table_positions_on_move.clear()
+            if self._move_start_pos_group.isNull() or final_snapped_group_pos == self._move_start_pos_group:
+                # print(f"DEBUG GuiItem ItemPositionHasChanged: No actual move for group {self.group_data.name} or start_pos invalid/unchanged.")
+                pass
             else:
                 tables_to_move_details = []
-                # Use the stored initial positions, not current ones which might have already moved with group
                 for table_name, old_table_scene_pos in self._initial_table_positions_on_move.items():
                     tables_to_move_details.append({"name": table_name, "old_pos": old_table_scene_pos})
                 
+                print(f"DEBUG GuiItem: Creating MoveGroupCommand. Group: {self.group_data.name}, Old ScenePos: {self._move_start_pos_group}, New Snapped ScenePos: {final_snapped_group_pos}")
+                print(f"DEBUG GuiItem:   Tables to move with command: {tables_to_move_details}")
+
                 command = MoveGroupCommand(main_window, self.group_data,
-                                           self._move_start_pos_group, current_pos_snapped,
+                                           self._move_start_pos_group,
+                                           final_snapped_group_pos,
                                            tables_to_move_details)
                 main_window.undo_stack.push(command)
-                
-                self._move_start_pos_group = QPointF()
-                self._initial_table_positions_on_move.clear()
+            
+            self._move_start_pos_group = QPointF()
+            self._initial_table_positions_on_move.clear()
+            if hasattr(self, '_initial_table_offsets_from_group'):
+                del self._initial_table_offsets_from_group
+
 
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self.update()
@@ -1219,17 +1223,25 @@ class GroupGraphicItem(QGraphicsRectItem):
                 self._initial_rect_on_resize = self.sceneBoundingRect()
                 event.accept()
                 return
-            else:
-                # Store current (snapped) SCENE position as the start of a potential move
+            else: 
+                # Store current (snapped) SCENE position of the group
                 self._move_start_pos_group = QPointF(snap_to_grid(self.scenePos().x(), GRID_SIZE),
                                                      snap_to_grid(self.scenePos().y(), GRID_SIZE))
                 self._initial_table_positions_on_move.clear()
+                self._initial_table_offsets_from_group = {} 
+
                 if main_window and hasattr(main_window, 'tables_data'):
-                    for table_name_in_group in list(self.group_data.table_names): # Iterate over a copy
+                    group_current_scene_pos = self.scenePos() # Group's current actual scene position
+                    # print(f"DEBUG GuiItem mousePress: Group '{self.group_data.name}' pressed at scenePos {group_current_scene_pos}. Snapped start: {self._move_start_pos_group}")
+                    for table_name_in_group in list(self.group_data.table_names):
                         table_data = main_window.tables_data.get(table_name_in_group)
                         if table_data and table_data.graphic_item:
-                            # Store the SCENE position of the table
-                            self._initial_table_positions_on_move[table_name_in_group] = QPointF(table_data.graphic_item.scenePos())
+                            table_scene_pos = table_data.graphic_item.scenePos()
+                            self._initial_table_positions_on_move[table_name_in_group] = QPointF(table_scene_pos)
+                            self._initial_table_offsets_from_group[table_name_in_group] = table_scene_pos - group_current_scene_pos
+                            # print(f"DEBUG GuiItem mousePress: Stored for table '{table_name_in_group}': initial_scene_pos={table_scene_pos}, offset_from_group={self._initial_table_offsets_from_group[table_name_in_group]}")
+                        # else:
+                            # print(f"DEBUG GuiItem mousePress: Table '{table_name_in_group}' in group '{self.group_data.name}' not found or no graphic_item.")
         
         self._resizing_edge = None
         super().mousePressEvent(event)
@@ -1283,7 +1295,10 @@ class GroupGraphicItem(QGraphicsRectItem):
             self.update()
             event.accept()
             return
+        # If not resizing, but moving the group (ItemIsMovable is true)
+        # The itemChange(ItemPositionChange) will handle visual update of tables during drag.
         super().mouseMoveEvent(event)
+
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self._resizing_edge is not None and self.isSelected():
@@ -1303,8 +1318,12 @@ class GroupGraphicItem(QGraphicsRectItem):
             return
 
         if self._resizing_edge is None and not self._move_start_pos_group.isNull():
-            self._move_start_pos_group = QPointF()
-            self._initial_table_positions_on_move.clear()
+            # This means a move operation might have just finished.
+            # The command creation is handled in itemChange(ItemPositionHasChanged).
+            # We clear _initial_table_offsets_from_group here as it's only for visual drag.
+            # _move_start_pos_group and _initial_table_positions_on_move are cleared in itemChange.
+            if hasattr(self, '_initial_table_offsets_from_group'):
+                del self._initial_table_offsets_from_group
 
         super().mouseReleaseEvent(event)
 

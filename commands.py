@@ -4,20 +4,22 @@
 from PyQt6.QtGui import QUndoCommand, QColor
 from PyQt6.QtCore import QPointF, QRectF
 from data_models import Table, Column, Relationship, GroupData
-from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem
+# from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem # Keep as local imports
 import copy
 import constants # Import constants for GRID_SIZE
+
+# print("commands.py loaded") # DEBUG
 
 class AddTableCommand(QUndoCommand):
     def __init__(self, main_window, table_data, description="Add Table"):
         super().__init__(description)
         self.main_window = main_window
-        self.table_data_copy = copy.deepcopy(table_data) # table_data.group_name is already set if provided
+        self.table_data_copy = copy.deepcopy(table_data)
         self.table_name = table_data.name
         self.table_graphic_item_instance = table_data.graphic_item if table_data.graphic_item else None
 
     def redo(self):
-        # print(f"Redo: Adding table '{self.table_name}'")
+        from gui_items import TableGraphicItem # LOCAL IMPORT
         self.main_window.tables_data[self.table_name] = self.table_data_copy
 
         if not self.table_data_copy.graphic_item or not self.table_data_copy.graphic_item.scene():
@@ -113,14 +115,14 @@ class DeleteTableCommand(QUndoCommand):
             if live_rel_to_remove:
                 self.main_window.relationships_data.remove(live_rel_to_remove)
 
-            if rel_data_copy.table2_name == self.table_name: # This table was the PK side
-                other_table_obj = self.main_window.tables_data.get(rel_data_copy.table1_name) # This is the FK side
+            if rel_data_copy.table2_name == self.table_name: 
+                other_table_obj = self.main_window.tables_data.get(rel_data_copy.table1_name) 
                 if other_table_obj:
                     fk_col = other_table_obj.get_column_by_name(rel_data_copy.fk_column_name)
                     if fk_col and fk_col.is_fk and fk_col.references_table == self.table_name:
                         is_still_fk_by_other_rel = any(
                             r.table1_name == other_table_obj.name and r.fk_column_name == fk_col.name
-                            for r in self.main_window.relationships_data # Check remaining relationships
+                            for r in self.main_window.relationships_data
                         )
                         if not is_still_fk_by_other_rel:
                             fk_col.is_fk = False
@@ -142,9 +144,10 @@ class DeleteTableCommand(QUndoCommand):
         self.main_window.scene.update()
 
     def undo(self):
+        # from gui_items import TableGraphicItem # Already imported locally if needed
         if self.table_name not in self.main_window.tables_data:
             self.main_window.tables_data[self.table_name] = self.table_data_copy
-            if self.table_graphic_item_instance:
+            if self.table_graphic_item_instance: 
                 self.table_data_copy.graphic_item = self.table_graphic_item_instance
                 if not self.table_graphic_item_instance.scene():
                     self.main_window.scene.addItem(self.table_graphic_item_instance)
@@ -427,6 +430,7 @@ class AddGroupCommand(QUndoCommand):
         self.group_graphic_item_instance = group_data.graphic_item if group_data.graphic_item else None
 
     def redo(self):
+        from gui_items import GroupGraphicItem # LOCAL IMPORT
         self.main_window.groups_data[self.group_name] = self.group_data_copy
 
         if not self.group_data_copy.graphic_item or not self.group_data_copy.graphic_item.scene():
@@ -556,6 +560,7 @@ class DeleteGroupCommand(QUndoCommand):
         self.main_window.scene.update()
 
     def undo(self):
+        from gui_items import GroupGraphicItem, TableGraphicItem # LOCAL IMPORT
         if self.group_name not in self.main_window.groups_data:
             self.main_window.groups_data[self.group_name] = self.group_data_copy
             if self.group_graphic_item_instance:
@@ -565,6 +570,11 @@ class DeleteGroupCommand(QUndoCommand):
                 self.group_graphic_item_instance.setPos(self.group_data_copy.x, self.group_data_copy.y)
                 self.group_graphic_item_instance.setRect(0,0, self.group_data_copy.width, self.group_data_copy.height)
                 self.group_graphic_item_instance.update()
+            # else: # Should not happen
+                # self.group_graphic_item_instance = GroupGraphicItem(self.group_data_copy)
+                # self.main_window.scene.addItem(self.group_graphic_item_instance)
+                # self.group_data_copy.graphic_item = self.group_graphic_item_instance
+
         
         for table_detail in self.contained_tables_details:
             table_copy = table_detail["data_copy"]
@@ -578,6 +588,11 @@ class DeleteGroupCommand(QUndoCommand):
                         self.main_window.scene.addItem(table_graphic_instance)
                     table_graphic_instance.setPos(table_copy.x, table_copy.y)
                     table_graphic_instance.update()
+                # else: # Should not happen if graphic item was stored
+                    # new_table_graphic = TableGraphicItem(table_copy)
+                    # self.main_window.scene.addItem(new_table_graphic)
+                    # table_copy.graphic_item = new_table_graphic
+
         
         for fk_state in self.affected_fk_cols_states_outside_group:
             other_table_obj = self.main_window.tables_data.get(fk_state["table_name"])
@@ -720,71 +735,67 @@ class MoveGroupCommand(QUndoCommand):
         super().__init__(description)
         self.main_window = main_window
         self.group_data_ref = group_data_ref
-        self.old_group_pos = QPointF(old_pos)
-        self.new_group_pos = QPointF(new_pos)
+        self.old_group_pos = QPointF(old_pos) # Expected to be scenePos
+        self.new_group_pos = QPointF(new_pos) # Expected to be scenePos
         
         self.delta = self.new_group_pos - self.old_group_pos
 
-        # initial_tables_positions is expected to be a list of dicts:
-        # [{"name": "TableName1", "old_pos": QPointF(x1, y1)}, ...]
         self.tables_original_details = copy.deepcopy(initial_tables_positions)
         
-        # print(f"MoveGroupCommand: Init. Group: {self.group_data_ref.name}, OldPos: {self.old_group_pos}, NewPos: {self.new_group_pos}, Delta: {self.delta}")
-        # print(f"  Initial table positions captured: {self.tables_original_details}")
+        print(f"DEBUG: MoveGroupCommand Init: Group '{self.group_data_ref.name}', OldPos: {self.old_group_pos}, NewPos: {self.new_group_pos}, Delta: {self.delta}")
+        print(f"DEBUG:   Initial table details for command: {self.tables_original_details}")
 
 
     def _apply_positions(self, target_group_pos: QPointF, move_delta: QPointF, is_redo_phase: bool):
-        # print(f"MoveGroupCommand._apply_positions: Group '{self.group_data_ref.name}' to {target_group_pos}, Delta: {move_delta}, is_redo: {is_redo_phase}")
+        print(f"DEBUG: MoveGroupCommand._apply_positions: Group '{self.group_data_ref.name}' to target_group_pos: {target_group_pos}, Delta for tables: {move_delta}, is_redo: {is_redo_phase}")
         
-        # Move the group itself
         self.group_data_ref.x = target_group_pos.x()
         self.group_data_ref.y = target_group_pos.y()
         if self.group_data_ref.graphic_item:
             self.group_data_ref.graphic_item.setPos(target_group_pos)
-            # print(f"  Group '{self.group_data_ref.name}' graphic_item moved to {self.group_data_ref.graphic_item.pos()}")
+            print(f"DEBUG:   Group '{self.group_data_ref.name}' graphic_item set to scenePos: {self.group_data_ref.graphic_item.scenePos()}")
 
-
-        # Move associated tables
         if not self.tables_original_details:
-            print(f"  Warning: No table details to move for group '{self.group_data_ref.name}'.")
+            print(f"DEBUG:   No table details to move for group '{self.group_data_ref.name}'.")
 
         for table_detail in self.tables_original_details:
             table_name = table_detail["name"]
-            original_table_pos = table_detail["old_pos"] # This is QPointF
+            original_table_scene_pos = table_detail["old_pos"] # This is the table's original scenePos
 
             table_data = self.main_window.tables_data.get(table_name)
             if table_data and table_data.graphic_item:
-                # print(f"  Processing table '{table_name}' from group. Original pos: {original_table_pos}")
-                target_table_pos_calculated = QPointF()
-                if is_redo_phase: # Moving to new position
-                    target_table_pos_calculated = original_table_pos + move_delta
-                    # print(f"    Redo: Table '{table_name}' new calculated pos: {target_table_pos_calculated} (orig: {original_table_pos} + delta: {move_delta})")
-                else: # Undoing, move back to original table pos
-                    target_table_pos_calculated = original_table_pos
-                    # print(f"    Undo: Table '{table_name}' new calculated pos (reverting): {target_table_pos_calculated}")
+                print(f"DEBUG:   Processing table '{table_name}' from group. Original scenePos: {original_table_scene_pos}")
                 
-                snapped_table_x = self.main_window.scene.snap_to_grid(target_table_pos_calculated.x(), constants.GRID_SIZE)
-                snapped_table_y = self.main_window.scene.snap_to_grid(target_table_pos_calculated.y(), constants.GRID_SIZE)
-                final_table_pos = QPointF(snapped_table_x, snapped_table_y)
+                target_table_scene_pos_calculated = QPointF()
+                if is_redo_phase: # Moving to new position
+                    target_table_scene_pos_calculated = original_table_scene_pos + move_delta
+                    print(f"DEBUG:     Redo: Table '{table_name}' new calculated scenePos: {target_table_scene_pos_calculated} (orig: {original_table_scene_pos} + delta: {move_delta})")
+                else: # Undoing, move back to original table scenePos
+                    target_table_scene_pos_calculated = original_table_scene_pos
+                    print(f"DEBUG:     Undo: Table '{table_name}' new calculated scenePos (reverting): {target_table_scene_pos_calculated}")
+                
+                snapped_table_x = self.main_window.scene.snap_to_grid(target_table_scene_pos_calculated.x(), constants.GRID_SIZE)
+                snapped_table_y = self.main_window.scene.snap_to_grid(target_table_scene_pos_calculated.y(), constants.GRID_SIZE)
+                final_table_scene_pos = QPointF(snapped_table_x, snapped_table_y)
 
-                table_data.x = final_table_pos.x()
-                table_data.y = final_table_pos.y()
-                table_data.graphic_item.setPos(final_table_pos)
-                # print(f"    Table '{table_name}' data/graphic_item moved to {final_table_pos}")
-            # else:
-                # print(f"  Warning: Table '{table_name}' or its graphic_item not found for moving with group.")
+                table_data.x = final_table_scene_pos.x()
+                table_data.y = final_table_scene_pos.y()
+                table_data.graphic_item.setPos(final_table_scene_pos)
+                print(f"DEBUG:     Table '{table_name}' data/graphic_item set to scenePos: {final_table_scene_pos}")
+            else:
+                print(f"DEBUG:   Warning: Table '{table_name}' or its graphic_item not found for moving with group.")
         
         self.main_window.update_all_relationships_graphics()
         self.main_window.update_window_title()
         self.main_window.populate_diagram_explorer()
 
     def redo(self):
-        # print(f"Redo MoveGroupCommand: Group '{self.group_data_ref.name}' to {self.new_group_pos}")
+        print(f"DEBUG: Redo MoveGroupCommand: Group '{self.group_data_ref.name}' to {self.new_group_pos}")
         self._apply_positions(self.new_group_pos, self.delta, is_redo_phase=True)
 
     def undo(self):
-        # print(f"Undo MoveGroupCommand: Group '{self.group_data_ref.name}' back to {self.old_group_pos}")
-        self._apply_positions(self.old_group_pos, self.delta, is_redo_phase=False) # Delta is used to revert tables if redo was applied
+        print(f"DEBUG: Undo MoveGroupCommand: Group '{self.group_data_ref.name}' back to {self.old_group_pos}")
+        self._apply_positions(self.old_group_pos, self.delta, is_redo_phase=False)
 
 
 class SetTableGroupCommand(QUndoCommand):
