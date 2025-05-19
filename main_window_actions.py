@@ -4,101 +4,107 @@
 import os
 from PyQt6.QtWidgets import QMessageBox, QFileDialog, QGraphicsView
 from PyQt6.QtCore import Qt
-from gui_items import TableGraphicItem, OrthogonalRelationshipLine # For type checking
-from commands import DeleteRelationshipCommand, DeleteTableCommand # Assuming commands.py is accessible
-import constants # Assuming constants.py is accessible
+from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem 
+from commands import DeleteRelationshipCommand, DeleteTableCommand, DeleteGroupCommand # Added DeleteGroupCommand
+import constants
 
 def new_diagram_action(window):
     """Clears the current diagram and starts a new one."""
-    # Clear selection on the scene first
     window.scene.clearSelection()
 
-    # Remove all table graphics from the scene
-    for table_data in list(window.tables_data.values()): # Iterate over a copy if modifying dict
-        if table_data.graphic_item and table_data.graphic_item.scene():
-            window.scene.removeItem(table_data.graphic_item)
-            # table_data.graphic_item = None # Optional: nullify reference
+    for item in list(window.scene.items()): 
+        if isinstance(item, (TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem)): 
+            window.scene.removeItem(item)
 
-    # Remove all relationship graphics from the scene
-    for rel_data in list(window.relationships_data): # Iterate over a copy
-        if rel_data.graphic_item and rel_data.graphic_item.scene():
-            window.scene.removeItem(rel_data.graphic_item)
-            # rel_data.graphic_item = None # Optional
-
-    # Clear data structures
     window.tables_data.clear()
     window.relationships_data.clear()
+    if hasattr(window, 'groups_data'): 
+        window.groups_data.clear()
 
-    # Reset undo stack and file path
     window.undo_stack.clear()
     window.current_file_path = None
 
-    # Reset scene rectangle to default or configured dimensions
     window.scene.setSceneRect(0, 0, constants.current_canvas_dimensions["width"], constants.current_canvas_dimensions["height"])
 
-    # Update UI elements
     window.update_window_title()
-    window.populate_diagram_explorer() # Assuming this method exists on window
-    print("New diagram created.")
+    window.populate_diagram_explorer()
+    # print("New diagram created.")
 
 
 def save_file_action(window):
     """Saves the current diagram to its existing path, or calls Save As if no path."""
     if window.current_file_path:
-        window.export_to_csv(window.current_file_path) # export_to_csv should be on window
-        window.undo_stack.setClean() # Mark as saved
-        window.update_window_title() # Update title to remove asterisk
+        window.export_to_csv(window.current_file_path) 
+        window.undo_stack.setClean()
+        window.update_window_title()
     else:
         save_file_as_action(window)
 
 
 def save_file_as_action(window):
     """Saves the current diagram to a new file path chosen by the user."""
-    # Suggest current file path or directory if available
-    suggested_path = window.current_file_path or "" # Or os.getcwd() for a default directory
+    suggested_path = window.current_file_path or os.path.join(os.getcwd(), "untitled.erd") 
     
-    path, _ = QFileDialog.getSaveFileName(window, "Save ERD File", suggested_path, "CSV Files (*.csv);;All Files (*)")
+    path, _ = QFileDialog.getSaveFileName(window, "Save ERD File", suggested_path, "ERD CSV Files (*.csv);;All Files (*)")
     if path:
-        window.export_to_csv(path) # export_to_csv should be on window
-        window.current_file_path = path # Update current file path
-        window.undo_stack.setClean() # Mark as saved
-        window.update_window_title() # Update title
+        window.export_to_csv(path) 
+        window.current_file_path = path 
+        window.undo_stack.setClean() 
+        window.update_window_title() 
 
 
 def delete_selected_items_action(window):
-    """Deletes selected items (tables or relationships) from the canvas."""
+    """Deletes selected items (tables, relationships, or groups) from the canvas."""
     selected_graphics = window.scene.selectedItems()
     if not selected_graphics:
         return
 
-    tables_to_delete_data_for_command = []
-    rels_to_delete_data_for_command = []
-    delete_message_parts = []
+    # Separate items by type for processing order and command creation
+    selected_tables_graphics = [item for item in selected_graphics if isinstance(item, TableGraphicItem)]
+    selected_relationships_graphics = [item for item in selected_graphics if isinstance(item, OrthogonalRelationshipPathItem)]
+    selected_groups_graphics = [item for item in selected_graphics if isinstance(item, GroupGraphicItem)]
 
-    # Identify selected tables first to handle cascading relationship deletions correctly
-    selected_table_datas = [item.table_data for item in selected_graphics if isinstance(item, TableGraphicItem)]
-
-    for item in selected_graphics:
-        if isinstance(item, OrthogonalRelationshipLine):
-            rel_data = item.relationship_data
-            # Only add relationship for direct deletion if neither of its connected tables are also selected for deletion
-            # (as deleting a table will automatically handle its connected relationships)
-            if not any(t.name == rel_data.table1_name for t in selected_table_datas) and \
-               not any(t.name == rel_data.table2_name for t in selected_table_datas):
-                if rel_data not in rels_to_delete_data_for_command: # Avoid duplicates
-                    rels_to_delete_data_for_command.append(rel_data)
-                    delete_message_parts.append(f"Relationship '{rel_data.table1_name}.{rel_data.fk_column_name} -> {rel_data.table2_name}.{rel_data.pk_column_name}'")
-        elif isinstance(item, TableGraphicItem):
-            if item.table_data not in tables_to_delete_data_for_command: # Avoid duplicates
-                tables_to_delete_data_for_command.append(item.table_data)
-                delete_message_parts.append(f"Table '{item.table_data.name}'")
+    # Data objects to be passed to commands
+    groups_to_delete_data = [item.group_data for item in selected_groups_graphics]
     
-    if not delete_message_parts: # Nothing to delete (e.g. only parts of items selected)
-        return
-        
+    # Filter out tables that are inside selected groups (they will be deleted by DeleteGroupCommand)
+    tables_to_delete_directly_data = []
+    for table_item in selected_tables_graphics:
+        is_in_selected_group = False
+        if table_item.table_data.group_name:
+            for group_data in groups_to_delete_data:
+                if table_item.table_data.group_name == group_data.name:
+                    is_in_selected_group = True
+                    break
+        if not is_in_selected_group:
+            tables_to_delete_directly_data.append(table_item.table_data)
+
+    # Filter out relationships connected to tables that will be deleted (either directly or via group deletion)
+    # or relationships connected to tables within groups being deleted.
+    all_tables_being_deleted_names = set(t.name for t in tables_to_delete_directly_data)
+    for group_data in groups_to_delete_data:
+        all_tables_being_deleted_names.update(group_data.table_names)
+
+    rels_to_delete_directly_data = []
+    for rel_item in selected_relationships_graphics:
+        if not (rel_item.relationship_data.table1_name in all_tables_being_deleted_names or \
+                rel_item.relationship_data.table2_name in all_tables_being_deleted_names):
+            rels_to_delete_directly_data.append(rel_item.relationship_data)
+
+
+    if not groups_to_delete_data and not tables_to_delete_directly_data and not rels_to_delete_directly_data:
+        return # Nothing to delete after filtering
+
+    # --- Build confirmation message ---
+    delete_message_parts = []
+    if groups_to_delete_data:
+        delete_message_parts.append(f"{len(groups_to_delete_data)} group(s) (and their contents)")
+    if tables_to_delete_directly_data:
+        delete_message_parts.append(f"{len(tables_to_delete_directly_data)} table(s)")
+    if rels_to_delete_directly_data:
+        delete_message_parts.append(f"{len(rels_to_delete_directly_data)} relationship(s)")
+    
     confirm_msg = f"Are you sure you want to delete {', '.join(delete_message_parts)}?"
-    if tables_to_delete_data_for_command: # Add warning if tables are being deleted
-        confirm_msg += "\n(Relationships connected to deleted tables will also be removed.)"
 
     reply = QMessageBox.question(window, "Confirm Deletion", confirm_msg,
                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -107,42 +113,41 @@ def delete_selected_items_action(window):
     if reply == QMessageBox.StandardButton.No:
         return
 
-    window.undo_stack.beginMacro(f"Delete selected: {', '.join(delete_message_parts)}")
-    # Important: Delete standalone relationships first
-    for rel_data in rels_to_delete_data_for_command:
-        # Ensure the relationship still exists (might have been removed by a table delete command if logic is complex)
-        if rel_data in window.relationships_data:
-             window.undo_stack.push(DeleteRelationshipCommand(window, rel_data))
+    window.undo_stack.beginMacro(f"Delete: {', '.join(delete_message_parts)}")
     
-    # Then delete tables (which will also handle their connected relationships)
-    for table_data in tables_to_delete_data_for_command:
-        # Ensure table still exists
-        if table_data.name in window.tables_data:
-            window.undo_stack.push(DeleteTableCommand(window, table_data))
-    window.undo_stack.endMacro()
+    # Order of deletion: Relationships first, then tables not in groups, then groups (which handle their tables)
+    for rel_data in rels_to_delete_directly_data:
+        if rel_data in window.relationships_data: 
+             window.undo_stack.push(DeleteRelationshipCommand(window, rel_data))
 
-    window.populate_diagram_explorer()
-    # window.update_window_title() will be called by undo_stack.cleanChanged signal
+    for table_data in tables_to_delete_directly_data:
+        if table_data.name in window.tables_data: 
+            window.undo_stack.push(DeleteTableCommand(window, table_data))
+            
+    if hasattr(window, 'groups_data'): # Ensure groups_data exists
+        for group_data in groups_to_delete_data:
+            if group_data.name in window.groups_data:
+                command = DeleteGroupCommand(window, group_data) # Use the new command
+                window.undo_stack.push(command)
+
+    window.undo_stack.endMacro()
+    window.populate_diagram_explorer() # Update explorer after commands are executed
 
 
 def toggle_relationship_mode_action_impl(window, checked):
     """Toggles the relationship drawing mode."""
     window.drawing_relationship_mode = checked
-    
-    # Ensure the menu action reflects the state
+
     if hasattr(window, 'actionDrawRelationship') and window.actionDrawRelationship.isChecked() != checked:
         window.actionDrawRelationship.setChecked(checked)
-        
-    # Also update the floating button menu's corresponding action if it's separate
-    # (This might require finding the action in the dynamically created menu or having a persistent reference)
 
     if checked:
-        window.view.setDragMode(QGraphicsView.DragMode.NoDrag) # Prevent scrolling while drawing
-        # Potentially change cursor too: QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
+        window.view.setDragMode(QGraphicsView.DragMode.NoDrag) 
+        if window.drawing_group_mode_active: 
+            window.toggle_group_drawing_mode(False)
     else:
-        window.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag) # Restore normal drag mode
-        # QApplication.restoreOverrideCursor()
-        # Clean up any line-in-progress if mode is turned off
+        if not window.drawing_group_mode_active: 
+            window.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag) 
         if window.scene.line_in_progress:
             window.scene.removeItem(window.scene.line_in_progress)
             window.scene.line_in_progress = None
@@ -152,6 +157,7 @@ def toggle_relationship_mode_action_impl(window, checked):
 
 def reset_drawing_mode_impl(window):
     """Resets the drawing mode, typically called after a relationship is drawn or cancelled."""
-    # This effectively means turning off the relationship drawing mode.
-    toggle_relationship_mode_action_impl(window, False)
-
+    if window.drawing_relationship_mode:
+        toggle_relationship_mode_action_impl(window, False)
+    if window.drawing_group_mode_active:
+        window.toggle_group_drawing_mode(False)

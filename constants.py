@@ -12,9 +12,9 @@ PADDING = 10
 GRID_SIZE = 20
 RELATIONSHIP_HANDLE_SIZE = 8
 MIN_HORIZONTAL_SEGMENT = GRID_SIZE * 1.5
-CSV_TABLE_DEF_MARKER = "TABLE_DEFINITION" # May not be used if all table info is under TABLE_POSITION
-CSV_COLUMN_DEF_MARKER = "COLUMN_DEFINITION" # Used if columns are listed separately
-CSV_TABLE_POSITION_MARKER = "TABLE_POSITION" # Used for table x,y,width,colors
+CSV_TABLE_DEF_MARKER = "TABLE_DEFINITION" 
+CSV_COLUMN_DEF_MARKER = "COLUMN_DEFINITION" 
+CSV_TABLE_POSITION_MARKER = "TABLE_POSITION" 
 CSV_RELATIONSHIP_DEF_MARKER = "RELATIONSHIP_DEF"
 CARDINALITY_OFFSET = 10
 CARDINALITY_TEXT_MARGIN = 25
@@ -27,8 +27,6 @@ DEFAULT_CANVAS_HEIGHT = 3000
 CSV_CANVAS_SIZE_MARKER = "CANVAS_SIZE_DEFINITION" # Marker for CSV
 
 # --- New Constants for Editable Data Types ---
-# This is the master list of data types the application knows about by default.
-# The user-editable list will be loaded from config or initialized from this.
 DEFAULT_COLUMN_DATA_TYPES = [
     "TEXT", "INTEGER", "REAL", "BLOB", "VARCHAR(255)", "BOOLEAN",
     "DATE", "DATETIME", "NUMERIC", "TIMESTAMP", "SERIAL", "UUID",
@@ -36,23 +34,26 @@ DEFAULT_COLUMN_DATA_TYPES = [
     "FLOAT", "DOUBLE PRECISION", "TIME", "JSON"
 ]
 
+# --- New Constants for Groups ---
+GROUP_TITLE_AREA_HEIGHT = 25
+GROUP_RESIZE_HANDLE_SIZE = 10       # Size of the square resize handles
+MIN_GROUP_WIDTH = GRID_SIZE * 8     # Minimum width for a group
+MIN_GROUP_HEIGHT = GRID_SIZE * 6    # Minimum height for a group (enough for title + some content)
+GROUP_BORDER_RADIUS = 5
+CSV_GROUP_DEF_MARKER = "GROUP_DEFINITION" # Marker for groups in CSV
 
 # --- Globally Accessible Current Settings (to be updated from config/UI) ---
-# These will be dictionaries or simple types updated by main_window.py
-current_theme_settings = {} # This is populated by main_window.py
+current_theme_settings = {} 
 
-# Holds the current canvas dimensions, loaded from config or defaults.
 current_canvas_dimensions = {
     "width": DEFAULT_CANVAS_WIDTH,
     "height": DEFAULT_CANVAS_HEIGHT
 }
 
-# Holds the current list of user-editable column data types.
-# Loaded from config, or defaults to DEFAULT_COLUMN_DATA_TYPES.
-editable_column_data_types = DEFAULT_COLUMN_DATA_TYPES[:] # Start with a copy
+editable_column_data_types = DEFAULT_COLUMN_DATA_TYPES[:] 
 
 
-# --- Theme Colors (unchanged from previous versions) ---
+# --- Theme Colors ---
 light_theme_colors = {
     "window_bg": QColor("#F8F9FA"),
     "view_bg": QColor("#FFFFFF"),
@@ -77,6 +78,11 @@ light_theme_colors = {
     "cardinality_text_color": QColor(73, 80, 87),
     "dialog_input_bg": QColor("#FFFFFF"),
     "dialog_input_border": QColor("#CED4DA"),
+    # Group Colors - Light Theme
+    "group_border_color": QColor(180, 180, 180),
+    "group_title_bg_color": QColor(220, 220, 220),
+    "group_title_text_color": QColor(50, 50, 50),
+    "group_selected_border_color": QColor(0, 123, 255), # Same as button_checked_bg
 }
 
 dark_theme_colors = {
@@ -103,8 +109,9 @@ dark_theme_colors = {
     "cardinality_text_color": QColor(206, 212, 218),
     "dialog_input_bg": QColor("#343A40"),
     "dialog_input_border": QColor("#6C757D"),
+    # Group Colors - Dark Theme
+    "group_border_color": QColor(100, 100, 100),
+    "group_title_bg_color": QColor(60, 60, 60),
+    "group_title_text_color": QColor(220, 220, 220),
+    "group_selected_border_color": QColor(0, 123, 255), # Same as button_checked_bg
 }
-
-# Note: current_theme_settings is initialized as an empty dict here.
-# main_window.py is responsible for populating it based on the loaded theme
-# and user default colors during its __init__ and update_theme_settings methods.

@@ -2,7 +2,8 @@
 # Handles creation of UI elements like menus, diagram explorer, and floating button.
 
 from PyQt6.QtWidgets import (
-    QApplication, QDockWidget, QTreeWidget, QPushButton, QMenu, QStyle
+    QApplication, QDockWidget, QTreeWidget, QPushButton, QMenu, QStyle,
+    QHeaderView 
 )
 from PyQt6.QtCore import Qt, QSize, QPoint, QPointF
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QPixmap, QPainter, QPen, QColor, QActionGroup
@@ -64,6 +65,12 @@ def create_menus(window):
     window.actionAddTable.triggered.connect(lambda: window.handle_add_table_button()) 
     editMenu.addAction(window.actionAddTable)
 
+    # Updated Add Group Action
+    window.actionAddGroup = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DirIcon, "Add Grp"), "Add &Group", window) 
+    window.actionAddGroup.setCheckable(True) # Make it checkable for mode toggling
+    window.actionAddGroup.triggered.connect(window.toggle_group_drawing_mode) # Connect to toggle mode
+    editMenu.addAction(window.actionAddGroup)
+
     window.actionDrawRelationship = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowForward, "Link"), "&Draw Relationship", window)
     window.actionDrawRelationship.setCheckable(True)
     window.actionDrawRelationship.triggered.connect(window.toggle_relationship_mode_action) 
@@ -72,7 +79,6 @@ def create_menus(window):
     # View Menu
     viewMenu = menubar.addMenu("&View")
     window.toggleExplorerAction = QAction("Toggle Diagram Explorer", window, checkable=True)
-    window.toggleExplorerAction.setChecked(True) 
     window.toggleExplorerAction.triggered.connect(window.toggle_diagram_explorer)
     viewMenu.addAction(window.toggleExplorerAction)
     
@@ -119,6 +125,9 @@ def create_diagram_explorer_widget(window):
     window.diagram_explorer_tree.setAlternatingRowColors(True)
     window.diagram_explorer_tree.itemDoubleClicked.connect(window.on_explorer_item_double_clicked)
 
+    window.diagram_explorer_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    window.diagram_explorer_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) 
+
     window.diagram_explorer_dock.setWidget(window.diagram_explorer_tree)
     window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, window.diagram_explorer_dock)
     window.diagram_explorer_dock.visibilityChanged.connect(lambda visible: update_floating_button_position_widget(window))
@@ -155,7 +164,7 @@ def create_main_floating_action_button_widget(window):
 
     window.mainFloatingButton.setIcon(plus_icon)
     window.mainFloatingButton.setIconSize(QSize(icon_render_size, icon_render_size))
-    window.mainFloatingButton.setToolTip("Add Item") # Changed from "הוסף פריט"
+    window.mainFloatingButton.setToolTip("Add Item") 
     window.mainFloatingButton.clicked.connect(window.show_floating_button_menu)
     
     window.mainFloatingButton.raise_() 
@@ -185,7 +194,7 @@ def update_floating_button_position_widget(window):
             window.mainFloatingButton.raise_()
 
         except RuntimeError as e:
-            print(f"Error in update_floating_button_position_widget: {e}")
+            # print(f"Error in update_floating_button_position_widget: {e}")
             pass
 
 
@@ -203,12 +212,16 @@ def show_floating_button_menu_widget(window):
         }}
     """)
     
-    # Changed text to English
     add_table_action = QAction("Add Table", window) 
     add_table_action.triggered.connect(lambda: window.handle_add_table_button())
     menu.addAction(add_table_action)
 
-    # Changed text to English
+    add_group_action_menu = QAction("Add Group", window)
+    add_group_action_menu.setCheckable(True) # Make it checkable
+    add_group_action_menu.setChecked(window.drawing_group_mode_active) # Sync with current mode
+    add_group_action_menu.triggered.connect(window.toggle_group_drawing_mode) # Connect to toggle
+    menu.addAction(add_group_action_menu)
+
     add_relationship_action = QAction("Add Relationship", window) 
     add_relationship_action.setCheckable(True)
     add_relationship_action.setChecked(window.drawing_relationship_mode)
