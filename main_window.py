@@ -3,7 +3,7 @@
 
 import sys
 import os
-import configparser
+# import configparser # Not directly used here anymore, handled by main_window_config
 import copy
 
 from PyQt6.QtWidgets import (
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QDockWidget, QTreeWidget, QTreeWidgetItem,
     QPushButton, QStyle, QMenu, QHeaderView, QInputDialog 
 )
-from PyQt6.QtCore import Qt, QPointF, QSize, QSizeF, QEvent, QTimer, QByteArray # Added QSizeF
+from PyQt6.QtCore import Qt, QPointF, QSize, QSizeF, QEvent, QTimer, QByteArray 
 from PyQt6.QtGui import (
     QColor, QBrush, QAction, QIcon, QKeySequence, QPixmap, QPainter,
     QActionGroup, QUndoStack, QPen
@@ -26,8 +26,9 @@ from canvas_scene import ERDGraphicsScene
 from commands import (
     AddTableCommand, DeleteRelationshipCommand, CreateRelationshipCommand,
     DeleteTableCommand, EditTableCommand,
-    AddOrthogonalBendCommand, MoveOrthogonalBendCommand, DeleteOrthogonalBendCommand,
-    AddGroupCommand # Added AddGroupCommand
+    AddGroupCommand, SetRelationshipVerticalSegmentXCommand # Keep SetRelationshipVerticalSegmentXCommand
+    # Removed: AddOrthogonalBendCommand, MoveOrthogonalBendCommand, DeleteOrthogonalBendCommand
+    # Removed: MoveCentralVerticalSegmentCommand (replaced by SetRelationshipVerticalSegmentXCommand)
 )
 
 # Import refactored modules
@@ -53,7 +54,8 @@ from main_window_table_operations import (
 )
 # main_window_group_operations will be created later
 from main_window_relationship_operations import (
-    finalize_relationship_drawing_impl, create_relationship_impl, update_custom_orthogonal_path_impl,
+    finalize_relationship_drawing_impl, create_relationship_impl, 
+    update_relationship_graphic_path_impl, # Renamed from update_custom_orthogonal_path_impl
     update_all_relationships_graphics_impl,
     update_relationship_table_names_impl,
     update_fk_references_to_pk_impl,
@@ -69,7 +71,7 @@ from main_window_file_operations import (
 from main_window_explorer_utils import (
     populate_diagram_explorer_util, on_explorer_item_double_clicked_util,
     toggle_diagram_explorer_util, ITEM_TYPE_TABLE, ITEM_TYPE_COLUMN,
-    ITEM_TYPE_RELATIONSHIP, ITEM_TYPE_CATEGORY, ITEM_TYPE_GROUP, ITEM_TYPE_GROUP_TABLE # Added Group types
+    ITEM_TYPE_RELATIONSHIP, ITEM_TYPE_CATEGORY, ITEM_TYPE_GROUP, ITEM_TYPE_GROUP_TABLE 
 )
 from main_window_dialog_handlers import (
     open_default_colors_dialog_handler, open_canvas_settings_dialog_handler,
@@ -95,8 +97,6 @@ class ERDCanvasWindow(QMainWindow):
         app_icon = QIcon(app_icon_path)
         if not app_icon.isNull():
             self.setWindowIcon(app_icon)
-        # else:
-            # print(f"Warning: Could not load application icon '{app_icon_path}'. Using default.")
 
         self.current_file_path = None
         self.current_theme = "light" 
@@ -125,7 +125,7 @@ class ERDCanvasWindow(QMainWindow):
         self.groups_data = {} 
 
         self.drawing_relationship_mode = False 
-        self.drawing_group_mode_active = False # Renamed from scene's drawing_group_mode for clarity
+        self.drawing_group_mode_active = False 
 
         self.scene = ERDGraphicsScene(self) 
         self.scene.setSceneRect(0, 0,
@@ -159,19 +159,15 @@ class ERDCanvasWindow(QMainWindow):
         if self.loaded_window_state:
             if not self.restoreState(self.loaded_window_state):
                 print("Warning: Failed to restore window state.")
-            # else:
-                # print("Window state restored.")
         
         if hasattr(self, 'diagram_explorer_dock') and hasattr(self, 'toggleExplorerAction'):
             self.toggleExplorerAction.setChecked(self.diagram_explorer_dock.isVisible())
 
 
     def closeEvent(self, event):
-        # print("Saving application settings on close...")
         self.save_app_settings() 
         super().closeEvent(event)
 
-    # --- Delegated methods to refactored modules ---
     def load_app_settings(self): load_app_settings(self)
     def save_app_settings(self): save_app_settings(self)
     def update_theme_settings(self): update_theme_settings_util(self)
@@ -185,7 +181,6 @@ class ERDCanvasWindow(QMainWindow):
     def _update_floating_button_position(self): update_floating_button_position_widget(self)
     def show_floating_button_menu(self): show_floating_button_menu_widget(self)
     
-    # Actions
     def new_diagram(self): new_diagram_action(self) 
     def save_file(self): save_file_action(self)
     def save_file_as(self): save_file_as_action(self)
@@ -193,29 +188,22 @@ class ERDCanvasWindow(QMainWindow):
     def toggle_relationship_mode_action(self, checked): toggle_relationship_mode_action_impl(self, checked)
     def reset_drawing_mode(self): reset_drawing_mode_impl(self)
     
-    # Table Operations
     def handle_add_table_button(self, table_name_prop=None, columns_prop=None, pos=None, width_prop=None, body_color_hex=None, header_color_hex=None, from_undo_redo=False):
         return handle_add_table_button_impl(self, table_name_prop, columns_prop, pos, width_prop, body_color_hex, header_color_hex, from_undo_redo)
     
-    # --- Group Operations ---
-    def handle_add_group_button(self, group_name_prop=None, pos=None, size=None, from_drawing_mode=False): # Added from_drawing_mode
-        """
-        Handles adding a new group.
-        If from_drawing_mode is True, pos and size are from the scene's drawing interaction.
-        Otherwise, it's an interactive add or programmatic add without drawing.
-        """
+    def handle_add_group_button(self, group_name_prop=None, pos=None, size=None, from_drawing_mode=False): 
         group_data_result = None
         group_name_to_use = group_name_prop
         
-        if not group_name_to_use and not from_drawing_mode: # Interactive add, get name first
+        if not group_name_to_use and not from_drawing_mode: 
             text, ok = QInputDialog.getText(self, "New Group", "Enter group name:")
             if not ok or not text.strip():
                 return None 
             group_name_to_use = text.strip()
-        elif from_drawing_mode and not group_name_to_use: # Drawing mode finished, now get name
+        elif from_drawing_mode and not group_name_to_use: 
             text, ok = QInputDialog.getText(self, "New Group", "Enter group name for the drawn area:")
             if not ok or not text.strip():
-                self.scene.cancel_active_drawing_modes() # Clean up drawing mode if name cancelled
+                self.scene.cancel_active_drawing_modes() 
                 return None
             group_name_to_use = text.strip()
 
@@ -230,15 +218,14 @@ class ERDCanvasWindow(QMainWindow):
             self.scene.cancel_active_drawing_modes()
             return None
 
-        # Determine position and size
         final_x, final_y, final_width, final_height = 0,0,0,0
 
-        if pos and size: # Position and size provided (likely from drawing mode)
+        if pos and size: 
             final_x = snap_to_grid(pos.x(), constants.GRID_SIZE)
             final_y = snap_to_grid(pos.y(), constants.GRID_SIZE)
             final_width = snap_to_grid(size.width(), constants.GRID_SIZE)
             final_height = snap_to_grid(size.height(), constants.GRID_SIZE)
-        else: # Default position and size (e.g., menu click)
+        else: 
             visible_rect_center = self.view.mapToScene(self.view.viewport().rect().center())
             default_width = constants.MIN_GROUP_WIDTH * 2
             default_height = constants.MIN_GROUP_HEIGHT * 2
@@ -256,71 +243,67 @@ class ERDCanvasWindow(QMainWindow):
         command = AddGroupCommand(self, group_data)
         self.undo_stack.push(command)
         
-        # After command execution, the group_data object in self.groups_data will have its graphic_item linked.
         group_data_result = self.groups_data.get(group_name_to_use)
 
-        if from_drawing_mode: # Ensure drawing mode is fully reset if initiated from there
+        if from_drawing_mode: 
             self.scene.cancel_active_drawing_modes()
             
         return group_data_result
 
     def toggle_group_drawing_mode(self, checked):
-        """Activates or deactivates the group drawing mode on the scene."""
         self.drawing_group_mode_active = checked
-        self.scene.drawing_group_mode = checked # Tell the scene it's in this mode
+        self.scene.drawing_group_mode = checked 
 
         if hasattr(self, 'actionAddGroup') and self.actionAddGroup.isChecked() != checked:
-            self.actionAddGroup.setChecked(checked) # Sync menu/toolbar button
+            self.actionAddGroup.setChecked(checked) 
 
         if checked:
             self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
             QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
-            # Deselect other drawing modes if active
             if self.drawing_relationship_mode:
-                self.reset_drawing_mode() # This will also reset relationship mode button
-        else: # Deactivating
-            # Scene's cancel_active_drawing_modes should handle cleanup if called from there
-            # If called directly (e.g. button uncheck), ensure cleanup
-            if self.scene.drawing_group_mode: # If scene was in this mode
-                self.scene.cancel_active_drawing_modes() # This will also restore cursor and drag mode
+                self.reset_drawing_mode() 
+        else: 
+            if self.scene.drawing_group_mode: 
+                self.scene.cancel_active_drawing_modes() 
             
-            # Fallback if cancel_active_drawing_modes wasn't triggered from scene
-            if QApplication.overrideCursor() is not None: # Check if cursor is overridden
+            if QApplication.overrideCursor() is not None: 
                  QApplication.restoreOverrideCursor()
             if self.view.dragMode() == QGraphicsView.DragMode.NoDrag:
                  self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
 
 
     def update_table_group_references(self, old_group_name, new_group_name):
-        """Updates table.group_name when a group is renamed."""
         for table_data in self.tables_data.values():
             if table_data.group_name == old_group_name:
                 table_data.group_name = new_group_name
         self.populate_diagram_explorer() 
 
 
-    # Relationship Operations
     def finalize_relationship_drawing(self, source_table_data, source_column_data, dest_table_data, dest_column_data):
         finalize_relationship_drawing_impl(self, source_table_data, source_column_data, dest_table_data, dest_column_data)
-    def create_relationship(self, fk_table_data, pk_table_data, fk_col_name, pk_col_name, rel_type, initial_anchor_points=None, from_undo_redo=False):
-        return create_relationship_impl(self, fk_table_data, pk_table_data, fk_col_name, pk_col_name, rel_type, initial_anchor_points, from_undo_redo)
-    def update_custom_orthogonal_path(self, relationship_data): update_custom_orthogonal_path_impl(self, relationship_data)
+    
+    def create_relationship(self, fk_table_data, pk_table_data, fk_col_name, pk_col_name, rel_type, 
+                            vertical_segment_x_override=None, # Added for consistency with CSV/Commands
+                            from_undo_redo=False):
+        return create_relationship_impl(self, fk_table_data, pk_table_data, fk_col_name, pk_col_name, rel_type, 
+                                        vertical_segment_x_override, from_undo_redo)
+    
+    def update_relationship_graphic_path(self, relationship_data): # Renamed
+        update_relationship_graphic_path_impl(self, relationship_data)
+    
     def update_all_relationships_graphics(self): update_all_relationships_graphics_impl(self)
     def update_relationship_table_names(self, old_table_name, new_table_name): update_relationship_table_names_impl(self, old_table_name, new_table_name)
     def update_fk_references_to_pk(self, pk_table_name, old_pk_col_name, new_pk_col_name): update_fk_references_to_pk_impl(self, pk_table_name, old_pk_col_name, new_pk_col_name)
     def remove_relationships_for_table(self, table_name, old_columns_of_table=None): remove_relationships_for_table_impl(self, table_name, old_columns_of_table)
     def edit_relationship_properties(self, relationship_data): edit_relationship_properties_impl(self, relationship_data)
     
-    # File Operations
     def handle_import_csv_button(self): handle_import_csv_button_impl(self) 
     def export_to_csv(self, file_path_to_save=None): export_to_csv_impl(self, file_path_to_save) 
     
-    # Dialog Handlers
     def open_default_colors_dialog(self): open_default_colors_dialog_handler(self)
     def open_canvas_settings_dialog(self): open_canvas_settings_dialog_handler(self)
     def open_datatype_settings_dialog(self): open_datatype_settings_dialog_handler(self)
 
-    # Event Handlers
     def keyPressEvent(self, event): keyPressEvent_handler(self, event)
     def resizeEvent(self, event): 
         super().resizeEvent(event)
@@ -343,7 +326,7 @@ class ERDCanvasWindow(QMainWindow):
         """Updates FK references in all tables when a table name changes."""
         for table_data in self.tables_data.values():
             if table_data.name == new_table_name and old_table_name != new_table_name:
-                 pass
+                 pass # This table is the one being renamed, its own FKs are not affected by its own name change
 
             for column in table_data.columns:
                 if column.is_fk and column.references_table == old_table_name:
@@ -360,3 +343,4 @@ if __name__ == '__main__':
     window = ERDCanvasWindow()
     window.show()
     sys.exit(app.exec())
+

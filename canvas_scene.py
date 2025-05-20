@@ -1,19 +1,19 @@
 # canvas_scene.py
-# Version: 20250519.02
+# Version: 20250519.05 (Fixed AttributeError)
 # Contains the ERDGraphicsScene class for managing scene interactions.
 
 from PyQt6.QtWidgets import (
     QGraphicsScene, QGraphicsPathItem, QMessageBox, QApplication, QGraphicsView,
-    QGraphicsSceneMouseEvent, QMenu
+    QGraphicsSceneMouseEvent, QMenu, QInputDialog
 )
 from PyQt6.QtCore import Qt, QPointF, QRectF, QSizeF
 from PyQt6.QtGui import QPen, QColor, QPainterPath, QTransform, QAction
 
 from constants import GRID_SIZE, DEFAULT_TABLE_WIDTH, TABLE_HEADER_HEIGHT, current_theme_settings, MIN_GROUP_WIDTH, MIN_GROUP_HEIGHT
 from utils import snap_to_grid
-from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem
-from data_models import Table, GroupData # Table is used for type hinting
-# from commands import SetTableGroupCommand # Keep as local import
+from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem # Assuming TableGraphicItem is imported
+from data_models import Table, GroupData
+
 
 class ERDGraphicsScene(QGraphicsScene):
     def __init__(self, parent_window=None):
@@ -28,9 +28,13 @@ class ERDGraphicsScene(QGraphicsScene):
         self.shortcut_start_table_item = None
         self.shortcut_start_column_obj = None
 
-        self.drawing_group_mode = False
-        self.new_group_rect_item = None
+        self.drawing_group_mode = False 
+        self.new_group_rect_item = None 
         self.new_group_start_pos = QPointF()
+
+        self.right_click_drawing_group_mode = False
+        self.right_click_group_rect_item = None
+        self.right_click_group_start_pos = QPointF()
 
 
     def drawBackground(self, painter, rect):
@@ -47,43 +51,27 @@ class ERDGraphicsScene(QGraphicsScene):
             for p in points: painter.drawPoint(p)
 
     def get_item_and_column_at(self, scene_pos: QPointF):
-        print(f"DEBUG SCENE: get_item_and_column_at scene_pos: {scene_pos}")
         view = self.views()[0] if self.views() else None
         if not view:
-            print("DEBUG SCENE: No view found in get_item_and_column_at")
             return None, None
 
         items_at_pos = self.items(scene_pos, Qt.ItemSelectionMode.IntersectsItemShape, Qt.SortOrder.DescendingOrder, view.transform())
-        print(f"DEBUG SCENE: Items at pos ({len(items_at_pos)}): {items_at_pos}")
-
         table_item_found = None
         column_obj_found = None
 
         for item in items_at_pos:
-            print(f"DEBUG SCENE: Checking item: {item} of type {type(item)}")
             if isinstance(item, TableGraphicItem):
                 table_item_found = item
-                print(f"DEBUG SCENE: Found TableGraphicItem: {table_item_found.table_data.name}")
                 item_local_pos = table_item_found.mapFromScene(scene_pos)
-                print(f"DEBUG SCENE:   Item local pos: {item_local_pos}")
-
                 current_y_check = table_item_found.header_height + table_item_found.padding / 2
                 for idx, col_data in enumerate(table_item_found.table_data.columns):
                     col_rect = QRectF(0, current_y_check, table_item_found.width, table_item_found.column_row_height)
-                    print(f"DEBUG SCENE:     Checking col '{col_data.name}' with rect: {col_rect}")
                     if col_rect.contains(item_local_pos):
                         column_obj_found = col_data
-                        print(f"DEBUG SCENE:       Found Column: {column_obj_found.name}, is_fk: {column_obj_found.is_fk}")
                         break
                     current_y_check += table_item_found.column_row_height
-                
                 if column_obj_found:
                     break
-        
-        if not table_item_found:
-            print("DEBUG SCENE: No TableGraphicItem found at position.")
-        elif not column_obj_found:
-            print(f"DEBUG SCENE: Table '{table_item_found.table_data.name}' found, but no specific column at local pos.")
         return table_item_found, column_obj_found
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
@@ -93,7 +81,7 @@ class ERDGraphicsScene(QGraphicsScene):
 
         item_at_pos = self.itemAt(event.scenePos(), self.views()[0].transform() if self.views() else QTransform())
 
-        if item_at_pos is None: # Double-click on empty space
+        if item_at_pos is None: 
             scene_pos = event.scenePos()
             snapped_x = snap_to_grid(scene_pos.x() - DEFAULT_TABLE_WIDTH / 2, GRID_SIZE)
             snapped_y = snap_to_grid(scene_pos.y() - TABLE_HEADER_HEIGHT / 2, GRID_SIZE)
@@ -104,7 +92,7 @@ class ERDGraphicsScene(QGraphicsScene):
     def cancel_active_drawing_modes(self) -> bool:
         action_cancelled = False
         if self.main_window and self.main_window.drawing_relationship_mode:
-            self.main_window.reset_drawing_mode() # This will also update button state and cursor
+            self.main_window.reset_drawing_mode() 
             action_cancelled = True
         if self.drawing_relationship_shortcut_active:
             self.drawing_relationship_shortcut_active = False
@@ -117,48 +105,38 @@ class ERDGraphicsScene(QGraphicsScene):
                 if self.main_window.view: self.main_window.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             action_cancelled = True
 
-        if self.drawing_group_mode:
+        if self.drawing_group_mode: 
             self.drawing_group_mode = False
             if self.new_group_rect_item:
                 self.removeItem(self.new_group_rect_item)
                 self.new_group_rect_item = None
             if self.main_window and hasattr(self.main_window, 'actionAddGroup'):
                 if self.main_window.actionAddGroup.isCheckable():
-                    self.main_window.actionAddGroup.setChecked(False)
-            if QApplication.overrideCursor() is not None:
+                    self.main_window.actionAddGroup.setChecked(False) 
+            if not self.right_click_drawing_group_mode and QApplication.overrideCursor() is not None:
                 QApplication.restoreOverrideCursor()
-            if self.main_window and self.main_window.view:
+            if not self.right_click_drawing_group_mode and self.main_window and self.main_window.view:
                  self.main_window.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             action_cancelled = True
-
+        
+        if self.right_click_drawing_group_mode: 
+            self.right_click_drawing_group_mode = False
+            if self.right_click_group_rect_item:
+                self.removeItem(self.right_click_group_rect_item)
+                self.right_click_group_rect_item = None
+            if not self.drawing_group_mode and QApplication.overrideCursor() is not None:
+                 QApplication.restoreOverrideCursor()
+            if not self.drawing_group_mode and self.main_window and self.main_window.view:
+                 self.main_window.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            action_cancelled = True
         return action_cancelled
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        print(f"DEBUG SCENE: mousePressEvent - Button: {event.button()}, ScenePos: {event.scenePos()}")
-        # Group drawing mode (Left Click)
-        if self.drawing_group_mode and event.button() == Qt.MouseButton.LeftButton:
-            print("DEBUG SCENE: mousePressEvent - In drawing_group_mode (Left Click)")
-            self.new_group_start_pos = event.scenePos()
-            self.new_group_rect_item = QGraphicsPathItem()
-            path = QPainterPath()
-            path.addRect(QRectF(self.new_group_start_pos, self.new_group_start_pos))
-            self.new_group_rect_item.setPath(path)
-            pen = QPen(QColor(current_theme_settings.get("group_border_color", QColor(100,100,255))), 1.5, Qt.PenStyle.DashLine)
-            self.new_group_rect_item.setPen(pen)
-            self.new_group_rect_item.setZValue(0.5)
-            self.addItem(self.new_group_rect_item)
-            event.accept()
-            return
-
-        # General relationship drawing mode (Button activated)
         if self.main_window and self.main_window.drawing_relationship_mode:
-            print("DEBUG SCENE: mousePressEvent - In drawing_relationship_mode")
             target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
             if event.button() == Qt.MouseButton.LeftButton:
                 if not self.start_item_for_line: 
-                    print("DEBUG SCENE:   First click in drawing_relationship_mode")
                     if target_table_item and target_column_obj:
-                        print(f"DEBUG SCENE:     Starting relationship from {target_table_item.table_data.name}.{target_column_obj.name}")
                         self.start_item_for_line = target_table_item
                         self.start_column_for_line = target_column_obj
                         self.line_in_progress = QGraphicsPathItem()
@@ -170,12 +148,9 @@ class ERDGraphicsScene(QGraphicsScene):
                         path.lineTo(event.scenePos())
                         self.line_in_progress.setPath(path)
                     else: 
-                        print("DEBUG SCENE:     Clicked empty space, resetting drawing_relationship_mode")
                         self.main_window.reset_drawing_mode()
                 else: 
-                    print("DEBUG SCENE:   Second click in drawing_relationship_mode")
                     if target_table_item and target_column_obj and target_table_item != self.start_item_for_line:
-                        print(f"DEBUG SCENE:     Ending relationship at {target_table_item.table_data.name}.{target_column_obj.name}")
                         self.main_window.finalize_relationship_drawing(
                             self.start_item_for_line.table_data, self.start_column_for_line,
                             target_table_item.table_data, target_column_obj
@@ -183,56 +158,75 @@ class ERDGraphicsScene(QGraphicsScene):
                     self.main_window.reset_drawing_mode()
                 event.accept(); return
             elif event.button() == Qt.MouseButton.RightButton: 
-                print("DEBUG SCENE:   Right click in drawing_relationship_mode, cancelling.")
-                self.main_window.reset_drawing_mode()
-                event.accept(); return
+                self.main_window.reset_drawing_mode() 
+                event.accept(); return 
 
-        # Right-click specific logic
+        if self.drawing_group_mode and event.button() == Qt.MouseButton.LeftButton:
+            self.new_group_start_pos = event.scenePos()
+            self.new_group_rect_item = QGraphicsPathItem() 
+            path = QPainterPath()
+            path.addRect(QRectF(self.new_group_start_pos, self.new_group_start_pos))
+            self.new_group_rect_item.setPath(path)
+            pen = QPen(QColor(current_theme_settings.get("group_border_color", QColor(100,100,255))), 1.5, Qt.PenStyle.DashLine)
+            self.new_group_rect_item.setPen(pen)
+            self.new_group_rect_item.setZValue(0.5) 
+            self.addItem(self.new_group_rect_item)
+            event.accept()
+            return
+        elif self.drawing_group_mode and event.button() == Qt.MouseButton.RightButton: 
+            self.cancel_active_drawing_modes()
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.RightButton:
-            print("DEBUG SCENE: mousePressEvent - RightButton pressed")
             item_at_pos = self.itemAt(event.scenePos(), self.views()[0].transform() if self.views() else QTransform())
             if item_at_pos:
-                print(f"DEBUG SCENE:   Item at pos: {item_at_pos}, allowing super().mousePressEvent for item context menu")
                 super().mousePressEvent(event) 
                 if event.isAccepted():
-                    print("DEBUG SCENE:   Item handled right-click (e.g. its own context menu). Returning.")
                     return 
-
+            
             if self.drawing_relationship_shortcut_active: 
-                print("DEBUG SCENE:   drawing_relationship_shortcut_active is TRUE, cancelling.")
                 self.cancel_active_drawing_modes()
                 event.accept(); return
-            else:
-                print("DEBUG SCENE:   drawing_relationship_shortcut_active is FALSE. Checking for new shortcut.")
-                target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
-                if target_table_item and target_column_obj:
-                    print(f"DEBUG SCENE:     Target for shortcut: Table '{target_table_item.table_data.name}', Column '{target_column_obj.name}', is_fk: {target_column_obj.is_fk}")
-                    if not target_column_obj.is_fk: 
-                        print("DEBUG SCENE:       Column is NOT FK. Starting relationship drawing shortcut.")
-                        if self.main_window and self.main_window.drawing_relationship_mode: self.main_window.reset_drawing_mode()
+            
+            target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
+            if target_table_item and target_column_obj:
+                if not target_column_obj.is_fk: 
+                    if self.main_window and self.main_window.drawing_relationship_mode: self.main_window.reset_drawing_mode() 
+                    if self.drawing_group_mode: self.cancel_active_drawing_modes() 
 
-                        self.drawing_relationship_shortcut_active = True
-                        self.shortcut_start_table_item = target_table_item
-                        self.shortcut_start_column_obj = target_column_obj
-                        self.line_in_progress = QGraphicsPathItem()
-                        self.line_in_progress.setPen(QPen(QColor(0,0,255,150), 2, Qt.PenStyle.DashDotLine))
-                        self.line_in_progress.setZValue(10)
-                        self.addItem(self.line_in_progress)
-                        start_pos = self.shortcut_start_table_item.get_attachment_point(None, from_column_name=self.shortcut_start_column_obj.name)
-                        path = QPainterPath(start_pos)
-                        path.lineTo(event.scenePos())
-                        self.line_in_progress.setPath(path)
-                        if self.main_window:
-                            QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
-                            if self.main_window.view: self.main_window.view.setDragMode(QGraphicsView.DragMode.NoDrag)
-                        event.accept(); return
-                    else:
-                        print("DEBUG SCENE:       Column IS FK. Not starting shortcut. Will fall through to scene context menu if applicable.")
-                else:
-                    print("DEBUG SCENE:     No specific table/column for shortcut. Will fall through to scene context menu if applicable.")
+                    self.drawing_relationship_shortcut_active = True
+                    self.shortcut_start_table_item = target_table_item
+                    self.shortcut_start_column_obj = target_column_obj
+                    self.line_in_progress = QGraphicsPathItem()
+                    self.line_in_progress.setPen(QPen(QColor(0,0,255,150), 2, Qt.PenStyle.DashDotLine))
+                    self.line_in_progress.setZValue(10)
+                    self.addItem(self.line_in_progress)
+                    start_pos = self.shortcut_start_table_item.get_attachment_point(None, from_column_name=self.shortcut_start_column_obj.name)
+                    path = QPainterPath(start_pos); path.lineTo(event.scenePos()); self.line_in_progress.setPath(path)
+                    if self.main_window:
+                        QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
+                        if self.main_window.view: self.main_window.view.setDragMode(QGraphicsView.DragMode.NoDrag)
+                    event.accept(); return
+            
+            if self.main_window and self.main_window.drawing_relationship_mode: self.main_window.reset_drawing_mode() 
+            if self.drawing_group_mode: self.cancel_active_drawing_modes() 
+
+            self.right_click_drawing_group_mode = True
+            self.right_click_group_start_pos = event.scenePos()
+            self.right_click_group_rect_item = QGraphicsPathItem()
+            path = QPainterPath(); path.addRect(QRectF(self.right_click_group_start_pos, self.right_click_group_start_pos))
+            self.right_click_group_rect_item.setPath(path)
+            pen = QPen(QColor(current_theme_settings.get("group_border_color", QColor(0, 150, 0))), 1.5, Qt.PenStyle.DashLine) 
+            self.right_click_group_rect_item.setPen(pen)
+            self.right_click_group_rect_item.setZValue(0.5)
+            self.addItem(self.right_click_group_rect_item)
+            if self.main_window: 
+                 QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
+                 if self.main_window.view: self.main_window.view.setDragMode(QGraphicsView.DragMode.NoDrag)
+            event.accept(); return
 
         if event.button() == Qt.MouseButton.LeftButton and self.drawing_relationship_shortcut_active:
-            print("DEBUG SCENE: mousePressEvent - LeftButton to finalize shortcut relationship")
             target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
             if target_table_item and target_column_obj and self.shortcut_start_table_item and target_table_item != self.shortcut_start_table_item:
                 if self.main_window:
@@ -240,22 +234,23 @@ class ERDGraphicsScene(QGraphicsScene):
                         self.shortcut_start_table_item.table_data, self.shortcut_start_column_obj,
                         target_table_item.table_data, target_column_obj
                     )
-            self.cancel_active_drawing_modes()
+            self.cancel_active_drawing_modes() 
             event.accept(); return
 
         if not event.isAccepted():
-            print("DEBUG SCENE: mousePressEvent - Event not accepted by specific logic, calling super()")
             super().mousePressEvent(event)
 
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self.drawing_group_mode and self.new_group_rect_item:
             rect = QRectF(self.new_group_start_pos, event.scenePos()).normalized()
-            path = QPainterPath()
-            path.addRect(rect)
-            self.new_group_rect_item.setPath(path)
-            event.accept()
-            return
+            path = QPainterPath(); path.addRect(rect); self.new_group_rect_item.setPath(path)
+            event.accept(); return
+        
+        if self.right_click_drawing_group_mode and self.right_click_group_rect_item:
+            rect = QRectF(self.right_click_group_start_pos, event.scenePos()).normalized()
+            path = QPainterPath(); path.addRect(rect); self.right_click_group_rect_item.setPath(path)
+            event.accept(); return
 
         active_start_item = None; active_start_column = None
         if self.main_window and self.main_window.drawing_relationship_mode and self.start_item_for_line:
@@ -273,32 +268,50 @@ class ERDGraphicsScene(QGraphicsScene):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self.drawing_group_mode and self.new_group_rect_item and event.button() == Qt.MouseButton.LeftButton:
             final_rect = QRectF(self.new_group_start_pos, event.scenePos()).normalized()
-            self.removeItem(self.new_group_rect_item)
-            self.new_group_rect_item = None
+            self.removeItem(self.new_group_rect_item); self.new_group_rect_item = None 
 
             if final_rect.width() < MIN_GROUP_WIDTH or final_rect.height() < MIN_GROUP_HEIGHT:
-                QMessageBox.information(self.main_window, "Group Too Small",
-                                        f"Minimum group size is {MIN_GROUP_WIDTH}x{MIN_GROUP_HEIGHT} pixels.")
+                QMessageBox.information(self.main_window, "קבוצה קטנה מדי",
+                                        f"גודל קבוצה מינימלי הוא {MIN_GROUP_WIDTH}x{MIN_GROUP_HEIGHT} פיקסלים.")
             else:
                 if self.main_window and hasattr(self.main_window, 'handle_add_group_button'):
                     snapped_x = snap_to_grid(final_rect.x(), GRID_SIZE)
                     snapped_y = snap_to_grid(final_rect.y(), GRID_SIZE)
                     snapped_width = snap_to_grid(final_rect.width(), GRID_SIZE)
                     snapped_height = snap_to_grid(final_rect.height(), GRID_SIZE)
-
                     self.main_window.handle_add_group_button(
                         pos=QPointF(snapped_x, snapped_y),
                         size=QSizeF(snapped_width, snapped_height),
-                        from_drawing_mode=True
+                        from_drawing_mode=True 
                     )
+            if final_rect.width() < MIN_GROUP_WIDTH or final_rect.height() < MIN_GROUP_HEIGHT:
+                self.cancel_active_drawing_modes() 
+            event.accept(); return
 
-            if not (final_rect.width() < MIN_GROUP_WIDTH or final_rect.height() < MIN_GROUP_HEIGHT):
-                 pass
-            else: 
-                self.cancel_active_drawing_modes()
+        if self.right_click_drawing_group_mode and self.right_click_group_rect_item and event.button() == Qt.MouseButton.RightButton:
+            final_rect = QRectF(self.right_click_group_start_pos, event.scenePos()).normalized()
+            self.removeItem(self.right_click_group_rect_item); self.right_click_group_rect_item = None
 
-            event.accept()
-            return
+            if final_rect.width() < MIN_GROUP_WIDTH or final_rect.height() < MIN_GROUP_HEIGHT:
+                QMessageBox.information(self.main_window, "קבוצה קטנה מדי",
+                                        f"גודל קבוצה מינימלי הוא {MIN_GROUP_WIDTH}x{MIN_GROUP_HEIGHT} פיקסלים.")
+            else:
+                if self.main_window and hasattr(self.main_window, 'handle_add_group_button'):
+                    group_name, ok = QInputDialog.getText(self.main_window, "שם קבוצה חדשה", "הכנס שם לקבוצה:")
+                    if ok and group_name.strip():
+                        snapped_x = snap_to_grid(final_rect.x(), GRID_SIZE)
+                        snapped_y = snap_to_grid(final_rect.y(), GRID_SIZE)
+                        snapped_width = snap_to_grid(final_rect.width(), GRID_SIZE)
+                        snapped_height = snap_to_grid(final_rect.height(), GRID_SIZE)
+                        
+                        self.main_window.handle_add_group_button(
+                            group_name_prop=group_name.strip(),
+                            pos=QPointF(snapped_x, snapped_y),
+                            size=QSizeF(snapped_width, snapped_height)
+                        )
+            
+            self.cancel_active_drawing_modes() 
+            event.accept(); return
 
         super().mouseReleaseEvent(event)
 
@@ -307,7 +320,7 @@ class ERDGraphicsScene(QGraphicsScene):
         if self.main_window and hasattr(self.main_window, 'update_all_relationships_graphics'):
             self.main_window.update_all_relationships_graphics()
 
-    def handle_table_movement_for_groups(self, table_item: TableGraphicItem, final_check=False):
+    def handle_table_movement_for_groups(self, table_item: TableGraphicItem, final_check=False, scene_pos_override: QPointF | None = None):
         from commands import SetTableGroupCommand 
         if not self.main_window or not hasattr(self.main_window, 'groups_data'):
             return
@@ -315,14 +328,31 @@ class ERDGraphicsScene(QGraphicsScene):
         table_data = table_item.table_data
         old_group_name = table_data.group_name
         determined_new_group_name = None
-
+        
         for group_data_obj in self.main_window.groups_data.values():
-            if group_data_obj.graphic_item and group_data_obj.graphic_item.contains_table(table_item):
-                determined_new_group_name = group_data_obj.name
-                break
-
+            if group_data_obj.graphic_item:
+                group_scene_rect = group_data_obj.graphic_item.sceneBoundingRect()
+                
+                point_to_test: QPointF
+                if scene_pos_override is not None:
+                    # If an override position is given (e.g., mouse cursor during drag over a group),
+                    # test this specific point for containment.
+                    point_to_test = scene_pos_override
+                else:
+                    # If no override, the table_item is at its current position.
+                    # Test the center of the table_item for containment.
+                    if table_item: # table_item is the TableGraphicItem
+                        point_to_test = table_item.sceneBoundingRect().center() # Corrected: No .graphic_item here
+                    else:
+                        # This case should ideally not be reached if table_item is always valid.
+                        continue 
+                
+                if group_scene_rect.contains(point_to_test):
+                    determined_new_group_name = group_data_obj.name
+                    break
+        
         if old_group_name != determined_new_group_name:
-            if final_check:
+            if final_check: 
                 command = SetTableGroupCommand(self.main_window, table_data, old_group_name, determined_new_group_name)
                 self.main_window.undo_stack.push(command)
 
@@ -332,17 +362,20 @@ class ERDGraphicsScene(QGraphicsScene):
     def handle_group_resize_visual_feedback(self, group_item: GroupGraphicItem):
         pass 
 
-    def snap_to_grid(self, value, grid_size):
+    def snap_to_grid(self, value, grid_size): 
         if grid_size == 0: return value
         return round(value / grid_size) * grid_size
 
     def contextMenuEvent(self, event: QGraphicsSceneMouseEvent):
-        print(f"DEBUG SCENE: contextMenuEvent - ScenePos: {event.scenePos()}")
-        item_at_pos = self.itemAt(event.scenePos(), self.views()[0].transform() if self.views() else QTransform())
-        print(f"DEBUG SCENE:   Item at pos for context menu: {item_at_pos}")
+        if self.drawing_group_mode or self.right_click_drawing_group_mode or \
+           (self.main_window and self.main_window.drawing_relationship_mode) or \
+           self.drawing_relationship_shortcut_active:
+            event.accept()
+            return
 
-        if not item_at_pos and self.main_window:
-            print("DEBUG SCENE:   No item at pos, creating scene context menu.")
+        item_at_pos = self.itemAt(event.scenePos(), self.views()[0].transform() if self.views() else QTransform())
+
+        if not item_at_pos and self.main_window: 
             menu = QMenu()
             if hasattr(self.main_window, 'current_theme_settings'):
                  menu.setStyleSheet(f"""
@@ -356,15 +389,21 @@ class ERDGraphicsScene(QGraphicsScene):
                     }}
                 """)
 
-            add_table_action = QAction("Add Table", menu)
+            add_table_action = QAction("הוסף טבלה", menu) 
             add_table_action.triggered.connect(lambda: self.main_window.handle_add_table_button(pos=event.scenePos()))
             menu.addAction(add_table_action)
 
-            add_group_action = QAction("Add Group", menu)
-            add_group_action.triggered.connect(lambda: self.main_window.handle_add_group_button(pos=event.scenePos()))
+            add_group_action = QAction("הוסף קבוצה (מכפתור)", menu) 
+            add_group_action.triggered.connect(lambda: self.main_window.handle_add_group_button(pos=event.scenePos())) 
             menu.addAction(add_group_action)
+            
+            start_draw_group_rmb_action = QAction("התחל ציור קבוצה (לחצן ימני)", menu) 
+            start_draw_group_rmb_action.setToolTip("לחץ לחיצה ימנית וגרור על מנת לצייר קבוצה") 
+            start_draw_group_rmb_action.setEnabled(False) 
+            menu.addAction(start_draw_group_rmb_action)
 
-            add_relationship_action = QAction("Add Relationship", menu)
+
+            add_relationship_action = QAction("הוסף קשר (מכפתור)", menu) 
             add_relationship_action.triggered.connect(lambda: self.main_window.toggle_relationship_mode_action(True))
             menu.addAction(add_relationship_action)
 
@@ -372,5 +411,5 @@ class ERDGraphicsScene(QGraphicsScene):
             menu.exec(event.screenPos())
             event.accept()
         else:
-            print(f"DEBUG SCENE:   Item at pos ({item_at_pos}) or no main_window. Calling super().contextMenuEvent.")
-            super().contextMenuEvent(event)
+            super().contextMenuEvent(event) 
+

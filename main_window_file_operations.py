@@ -5,10 +5,10 @@ import csv
 import os
 import sys
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
-from PyQt6.QtCore import QPointF, QRectF, Qt, QSizeF # Added QSizeF
+from PyQt6.QtCore import QPointF, QRectF, Qt, QSizeF 
 import constants
-from data_models import Column, GroupData # Added GroupData
-from commands import AddTableCommand, AddGroupCommand, SetTableGroupCommand # Added AddGroupCommand, SetTableGroupCommand
+from data_models import Column, GroupData 
+from commands import AddTableCommand, AddGroupCommand, SetTableGroupCommand 
 
 def handle_import_csv_button_impl(window):
     """Handles importing ERD data from a CSV file."""
@@ -18,9 +18,9 @@ def handle_import_csv_button_impl(window):
 
     window.new_diagram() 
 
-    parsed_tables_from_csv = {} # {table_name: {"columns": [], "pos": None, "width": ..., "colors": ..., "group_name": ...}}
+    parsed_tables_from_csv = {} 
     parsed_relationships_from_csv = [] 
-    parsed_groups_from_csv = {} # {group_name: {"pos": ..., "size": ..., "colors": ..., "table_names_in_group": []}}
+    parsed_groups_from_csv = {} 
     imported_canvas_width, imported_canvas_height = None, None
 
     try:
@@ -32,7 +32,7 @@ def handle_import_csv_button_impl(window):
             header_table_pos_expected = "table name" 
             header_rels_expected = "from table (fk source)" 
             header_canvas_expected = "width" 
-            header_group_def_expected = "group name" # For GROUP_DEFINITION section
+            header_group_def_expected = "group name" 
 
 
             for row_num, row in enumerate(reader):
@@ -46,11 +46,12 @@ def handle_import_csv_button_impl(window):
                     if len(row) > 1 and row[1].strip().lower() == header_table_pos_expected: continue
                 elif first_cell_stripped == constants.CSV_RELATIONSHIP_DEF_MARKER:
                     current_section = "RELATIONSHIPS"
+                    # Check for new header with VerticalSegmentX
                     if len(row) > 1 and row[1].strip().lower() == header_rels_expected: continue
                 elif first_cell_stripped == constants.CSV_CANVAS_SIZE_MARKER:
                     current_section = "CANVAS_SIZE"
                     if len(row) > 1 and row[1].strip().lower() == header_canvas_expected: continue
-                elif first_cell_stripped == constants.CSV_GROUP_DEF_MARKER: # NEW: Group Definition Section
+                elif first_cell_stripped == constants.CSV_GROUP_DEF_MARKER: 
                     current_section = "GROUP_DEFINITIONS"
                     if len(row) > 1 and row[1].strip().lower() == header_group_def_expected: continue
                 elif current_section is None and len(row) > 1 and \
@@ -62,10 +63,8 @@ def handle_import_csv_button_impl(window):
                     current_section = "COLUMNS"
 
 
-                # --- Process data based on current section ---
                 if current_section == "COLUMNS": 
-                    # Legacy format: Table Name,Column Name,Data Type,Is PK,Is FK,Ref Table,Ref Col,FK Rel Type, [Group Name (optional new)]
-                    if len(row) < 2 : continue # Must have at least table and col name
+                    if len(row) < 2 : continue 
                     table_name_csv, col_name_csv = row[0].strip(), row[1].strip()
                     if not table_name_csv : continue 
 
@@ -73,8 +72,7 @@ def handle_import_csv_button_impl(window):
                         parsed_tables_from_csv[table_name_csv] = {"columns": [], "pos": None, "width": constants.DEFAULT_TABLE_WIDTH, "body_color": None, "header_color": None, "group_name": None}
                     
                     if col_name_csv == "N/A (No Columns)" or not col_name_csv: 
-                        # Check for group name if table has no columns
-                        if len(row) > 8 and row[8].strip(): # Assuming group name is 9th element (index 8)
+                        if len(row) > 8 and row[8].strip(): 
                              parsed_tables_from_csv[table_name_csv]["group_name"] = row[8].strip()
                         continue
 
@@ -86,7 +84,7 @@ def handle_import_csv_button_impl(window):
                     fk_rel_type = row[7].strip() if is_fk_val and len(row) > 7 and row[7].strip() else "N:1"
                     table_group_name = row[8].strip() if len(row) > 8 and row[8].strip() else None
                     
-                    if table_group_name: # Store group name if provided for this table
+                    if table_group_name: 
                         parsed_tables_from_csv[table_name_csv]["group_name"] = table_group_name
 
                     column = Column(name=col_name_csv, data_type=data_type, is_pk=is_pk, is_fk=is_fk_val,
@@ -94,7 +92,6 @@ def handle_import_csv_button_impl(window):
                     parsed_tables_from_csv[table_name_csv]["columns"].append(column)
 
                 elif current_section == "TABLE_DEFINITIONS": 
-                    # Marker,Table Name,X,Y,Width,BodyColor,HeaderColor, [Group Name (optional new)]
                     if len(row) < 5: continue
                     table_name_def = row[1].strip()
                     try:
@@ -113,14 +110,13 @@ def handle_import_csv_button_impl(window):
                             "width": width_val,
                             "body_color": body_hex,
                             "header_color": header_hex,
-                            "group_name": group_name_for_table # Store group name
+                            "group_name": group_name_for_table 
                         })
                     except ValueError as ve:
                         print(f"Warning: Could not parse number in table definition for '{table_name_def}': {row} - {ve}")
                 
-                elif current_section == "GROUP_DEFINITIONS": # NEW
-                    # Marker, Group Name, X, Y, Width, Height, [BorderColor, TitleBGColor, TitleTextColor, TableNames (semicolon separated)]
-                    if len(row) < 6: continue # Marker + Name + X + Y + Width + Height
+                elif current_section == "GROUP_DEFINITIONS": 
+                    if len(row) < 6: continue 
                     group_name_csv = row[1].strip()
                     if not group_name_csv: continue
                     try:
@@ -139,37 +135,33 @@ def handle_import_csv_button_impl(window):
                             "border_color_hex": g_border_hex,
                             "title_bg_color_hex": g_titlebg_hex,
                             "title_text_color_hex": g_titletext_hex,
-                            "table_names_in_group": table_names_in_group # Store for later association
+                            "table_names_in_group": table_names_in_group 
                         }
                     except ValueError as ve:
                         print(f"Warning: Could not parse group definition for '{group_name_csv}': {row} - {ve}")
 
 
                 elif current_section == "RELATIONSHIPS": 
+                    # Marker, FromTable, FKCol, ToTable, PKCol, RelType, VerticalSegmentX (optional)
                     if len(row) < 6: continue 
                     rel_from_table, rel_from_col = row[1].strip(), row[2].strip()
                     rel_to_table, rel_to_col = row[3].strip(), row[4].strip()
                     rel_type = row[5].strip() if len(row) > 5 and row[5].strip() else "N:1"
                     
-                    anchor_points_str = row[6].strip() if len(row) > 6 and row[6].strip() else ""
-                    anchor_points_list = []
-                    if anchor_points_str:
+                    vertical_segment_x_override = None
+                    if len(row) > 6 and row[6].strip():
                         try:
-                            point_pairs = anchor_points_str.split(';')
-                            for pair_str in point_pairs:
-                                if pair_str: 
-                                    coords = pair_str.split(',')
-                                    if len(coords) == 2:
-                                        anchor_points_list.append(QPointF(float(coords[0]), float(coords[1])))
-                        except ValueError as ve:
-                            print(f"Warning: Could not parse anchor points for relationship {rel_from_table}.{rel_from_col}: '{anchor_points_str}' - {ve}")
-                            anchor_points_list = [] 
+                            vertical_segment_x_override = float(row[6].strip())
+                        except ValueError:
+                            # print(f"Warning: Could not parse VerticalSegmentX for relationship {rel_from_table}.{rel_from_col}: '{row[6]}'")
+                            pass # Keep as None if parsing fails
 
                     if all([rel_from_table, rel_from_col, rel_to_table, rel_to_col]):
                         parsed_relationships_from_csv.append({
                             "from_table": rel_from_table, "from_col": rel_from_col,
                             "to_table": rel_to_table, "to_col": rel_to_col,
-                            "type": rel_type, "anchors": anchor_points_list 
+                            "type": rel_type, 
+                            "vertical_segment_x_override": vertical_segment_x_override 
                         })
                 
                 elif current_section == "CANVAS_SIZE": 
@@ -186,23 +178,16 @@ def handle_import_csv_button_impl(window):
                 constants.current_canvas_dimensions["height"] = imported_canvas_height
                 if window.scene: 
                     window.scene.setSceneRect(0,0, imported_canvas_width, imported_canvas_height)
-                # print(f"Applied canvas size from CSV: {imported_canvas_width}x{imported_canvas_height}")
 
             window.undo_stack.beginMacro("Import CSV")
             
-            # 1. Create Groups first (so they exist when tables are created/associated)
             for group_name_csv, g_data in parsed_groups_from_csv.items():
-                # Use AddGroupCommand via handle_add_group_button
-                # Note: table_names_in_group from CSV are just for reference during table creation phase.
-                # The actual association will happen via SetTableGroupCommand later.
                 window.handle_add_group_button(
                     group_name_prop=group_name_csv,
                     pos=g_data["pos"],
                     size=g_data["size"] 
-                    # Colors will be handled by GroupData defaults or theme for now, could be extended
                 )
 
-            # 2. Create Tables
             all_imported_table_graphics = [] 
             for table_name_to_import, t_data in parsed_tables_from_csv.items():
                 table_obj_data = window.handle_add_table_button( 
@@ -212,25 +197,18 @@ def handle_import_csv_button_impl(window):
                     width_prop=t_data.get("width"),
                     body_color_hex=t_data.get("body_color"),
                     header_color_hex=t_data.get("header_color")
-                    # group_name is handled next
                 )
                 if table_obj_data and table_obj_data.graphic_item:
                     all_imported_table_graphics.append(table_obj_data.graphic_item)
-
-            # 3. Associate Tables with Groups (using SetTableGroupCommand)
-            # This ensures the association is undoable and updates both table.group_name and group.table_names
+            
             for table_name_to_import, t_data in parsed_tables_from_csv.items():
                 imported_group_name = t_data.get("group_name")
-                table_obj_data = window.tables_data.get(table_name_to_import) # Get the live object
+                table_obj_data = window.tables_data.get(table_name_to_import) 
                 if table_obj_data and imported_group_name:
-                    if imported_group_name in window.groups_data: # Ensure group exists
-                        # Create command to set group, old_group_name is None as table is newly created
+                    if imported_group_name in window.groups_data: 
                         cmd = SetTableGroupCommand(window, table_obj_data, None, imported_group_name)
                         window.undo_stack.push(cmd)
-                    # else:
-                        # print(f"Warning: Group '{imported_group_name}' for table '{table_name_to_import}' not found during import association.")
             
-            # 4. Create relationships (FKs in columns are handled by EditTable/AddTable logic if they create relationships)
             for rel_info in parsed_relationships_from_csv:
                 fk_table_obj = window.tables_data.get(rel_info["from_table"])
                 pk_table_obj = window.tables_data.get(rel_info["to_table"])
@@ -239,17 +217,14 @@ def handle_import_csv_button_impl(window):
                     pk_col_obj = pk_table_obj.get_column_by_name(rel_info["to_col"])
                     if fk_col_obj and pk_col_obj: 
                         if not pk_col_obj.is_pk: 
-                            # print(f"Warning: Explicit relationship references non-PK column: {rel_info['to_table']}.{rel_info['to_col']}. Skipping.")
                             continue
+                        # Pass vertical_segment_x_override to create_relationship
                         window.create_relationship(
                             fk_table_obj, pk_table_obj,
                             fk_col_obj.name, pk_col_obj.name,
-                            rel_info["type"], initial_anchor_points=rel_info["anchors"] 
+                            rel_info["type"], 
+                            vertical_segment_x_override=rel_info["vertical_segment_x_override"]
                         )
-                    # else:
-                        # print(f"Warning: Columns for explicit relationship not found: {rel_info}. Skipping.")
-                # else:
-                    # print(f"Warning: Tables for explicit relationship not found: {rel_info}. Skipping.")
             
             window.undo_stack.endMacro()
 
@@ -303,8 +278,6 @@ def export_to_csv_impl(window, file_path_to_save=None):
         with open(file_path_to_save, 'w', newline='', encoding='utf-8-sig') as csvfile: 
             writer = csv.writer(csvfile)
 
-            # --- Column Definitions (Legacy Section + Group Name) ---
-            # Added "Group Name" as the last column here
             writer.writerow(["Table Name", "Column Name", "Data Type", "Is Primary Key", "Is Foreign Key", 
                              "References Table", "References Column", "FK Relationship Type", "Group Name"])
             for _, table_obj in sorted(window.tables_data.items()): 
@@ -322,13 +295,11 @@ def export_to_csv_impl(window, file_path_to_save=None):
                             col.references_table if col.is_fk else "",
                             col.references_column if col.is_fk else "",
                             col.fk_relationship_type if col.is_fk else "",
-                            group_name_to_write # Write table's group name
+                            group_name_to_write 
                         ])
             
             writer.writerow([]) 
 
-            # --- Table Positions and Properties ---
-            # Added "Group Name" to this section as well for redundancy/completeness if needed, or can be removed if only in column section
             writer.writerow([constants.CSV_TABLE_POSITION_MARKER, "Table Name", "X", "Y", "Width", 
                              "Body Color HEX", "Header Color HEX", "Group Name"])
             for table_name, table_obj in sorted(window.tables_data.items()):
@@ -341,12 +312,11 @@ def export_to_csv_impl(window, file_path_to_save=None):
                     table_obj.width,
                     table_obj.body_color.name(), 
                     table_obj.header_color.name(),
-                    group_name_to_write # Write table's group name
+                    group_name_to_write 
                 ])
             
             writer.writerow([]) 
 
-            # --- Group Definitions --- NEW SECTION
             if hasattr(window, 'groups_data') and window.groups_data:
                 writer.writerow([constants.CSV_GROUP_DEF_MARKER, "Group Name", "X", "Y", "Width", "Height",
                                  "Border Color HEX", "Title BG Color HEX", "Title Text Color HEX", "Contained Table Names"])
@@ -367,17 +337,20 @@ def export_to_csv_impl(window, file_path_to_save=None):
                 writer.writerow([])
 
 
-            # --- Canvas Size ---
             writer.writerow([constants.CSV_CANVAS_SIZE_MARKER, "Width", "Height"]) 
             writer.writerow([constants.CSV_CANVAS_SIZE_MARKER, constants.current_canvas_dimensions["width"], constants.current_canvas_dimensions["height"]])
             
-            # --- Relationship Definitions ---
             if window.relationships_data:
                 writer.writerow([]) 
-                writer.writerow([constants.CSV_RELATIONSHIP_DEF_MARKER, "From Table (FK Source)", "FK Column", "To Table (PK Source)", "PK Column", "Relationship Type", "AnchorPoints"])
+                # Updated header for relationships to include VerticalSegmentX
+                writer.writerow([constants.CSV_RELATIONSHIP_DEF_MARKER, 
+                                 "From Table (FK Source)", "FK Column", 
+                                 "To Table (PK Source)", "PK Column", 
+                                 "Relationship Type", "VerticalSegmentX"])
                 sorted_rels = sorted(window.relationships_data, key=lambda r: (r.table1_name, r.fk_column_name, r.table2_name, r.pk_column_name))
                 for rel in sorted_rels:
-                    anchor_points_str = ";".join([f"{p.x()},{p.y()}" for p in rel.anchor_points])
+                    # Write vertical_segment_x_override, or empty string if None
+                    vertical_x_str = str(rel.vertical_segment_x_override) if rel.vertical_segment_x_override is not None else ""
                     writer.writerow([
                         constants.CSV_RELATIONSHIP_DEF_MARKER, 
                         rel.table1_name,
@@ -385,10 +358,11 @@ def export_to_csv_impl(window, file_path_to_save=None):
                         rel.table2_name,
                         rel.pk_column_name,
                         rel.relationship_type,
-                        anchor_points_str 
+                        vertical_x_str 
                     ])
 
             QMessageBox.information(window, "File Saved", f"Data saved successfully to: {file_path_to_save}")
     except Exception as e:
         QMessageBox.critical(window, "Save Error", f"Could not save file: {e}")
         print(f"Error exporting to CSV: {e}")
+
