@@ -18,16 +18,10 @@ from PyQt6.QtGui import (
 from constants import (
     TABLE_HEADER_HEIGHT, COLUMN_HEIGHT, PADDING, GRID_SIZE,
     RELATIONSHIP_HANDLE_SIZE, MIN_HORIZONTAL_SEGMENT, CARDINALITY_OFFSET,
-    CARDINALITY_TEXT_MARGIN, TABLE_RESIZE_HANDLE_WIDTH, MIN_TABLE_WIDTH,
-    current_theme_settings,
-    GROUP_TITLE_AREA_HEIGHT,
-    GROUP_RESIZE_HANDLE_SIZE,
-    MIN_GROUP_WIDTH,
-    MIN_GROUP_HEIGHT,
-    GROUP_BORDER_RADIUS
+    CARDINALITY_TEXT_MARGIN, TABLE_RESIZE_HANDLE_WIDTH, MIN_TABLE_WIDTH, current_theme_settings
 )
 from utils import snap_to_grid, get_contrasting_text_color
-from data_models import GroupData, Table 
+from data_models import Table 
 
 
 LINE_CLICK_PERPENDICULAR_TOLERANCE = 5 
@@ -198,9 +192,6 @@ class TableGraphicItem(QGraphicsItem):
             new_pos_in_parent = QPointF(snap_to_grid(value.x(), GRID_SIZE), snap_to_grid(value.y(), GRID_SIZE))
 
             if new_pos_in_parent != self.pos():
-                if not self.parentItem() and hasattr(self.scene(), 'handle_table_movement_for_groups'):
-                    self.scene().handle_table_movement_for_groups(self, scene_pos_override=new_pos_in_parent, final_check=False)
-
                 if hasattr(self.scene(), 'update_relationships_for_table'):
                     self.scene().update_relationships_for_table(self.table_data.name)
                 return new_pos_in_parent 
@@ -227,14 +218,6 @@ class TableGraphicItem(QGraphicsItem):
 
             if hasattr(self.scene(), 'update_relationships_for_table'):
                  self.scene().update_relationships_for_table(self.table_data.name)
-            
-            is_part_of_active_group_drag = False
-            mouse_grabber = self.scene().mouseGrabberItem() if self.scene() else None
-            if isinstance(mouse_grabber, GroupGraphicItem) and self.parentItem() == mouse_grabber:
-                is_part_of_active_group_drag = True
-            
-            if not is_part_of_active_group_drag and hasattr(self.scene(), 'handle_table_movement_for_groups'):
-                self.scene().handle_table_movement_for_groups(self, final_check=True)
 
 
         if change == QGraphicsItem.GraphicsItemChange.ItemParentHasChanged:
@@ -314,8 +297,7 @@ class TableGraphicItem(QGraphicsItem):
             "name": self.table_data.name,
             "body_color_hex": self.table_data.body_color.name(),
             "header_color_hex": self.table_data.header_color.name(),
-            "columns": copy.deepcopy(self.table_data.columns), 
-            "group_name": self.table_data.group_name 
+            "columns": copy.deepcopy(self.table_data.columns)
         }
 
         dialog = TableDialog(main_window, self.table_data.name,
@@ -337,8 +319,7 @@ class TableGraphicItem(QGraphicsItem):
                 "name": new_name_str,
                 "body_color_hex": new_body_color_hex_str,
                 "header_color_hex": new_header_color_hex_str,
-                "columns": new_columns_data_list, 
-                "group_name": self.table_data.group_name 
+                "columns": new_columns_data_list
             }
 
             name_changed = old_properties["name"] != new_properties["name"]
@@ -397,7 +378,6 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
             self.start_attachment_point = start_point
             self.end_attachment_point = end_point
             self._build_path()
-            self._update_vertical_segment_handle_visibility() 
 
     def _calculate_intermediate_x_scene(self, s_point_scene: QPointF, e_point_scene: QPointF) -> float:
         if self.relationship_data.vertical_segment_x_override is not None:
@@ -615,20 +595,62 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self.dragging_vertical_segment and self.isSelected():
             delta_x_item = event.pos().x() - self._drag_start_pos_item.x()
-            new_vertical_x_scene = self.original_vertical_segment_x_scene + delta_x_item 
+            # Calculate the new proposed X in scene coordinates
+            new_vertical_x_scene_candidate = self.original_vertical_segment_x_scene + delta_x_item
 
-            if self.relationship_data.vertical_segment_x_override != new_vertical_x_scene:
-                self.relationship_data.vertical_segment_x_override = new_vertical_x_scene
+            # Update the data model directly for live feedback
+            self.relationship_data.vertical_segment_x_override = new_vertical_x_scene_candidate
+
+            # --- MODIFIED LIVE UPDATE of attachment points and path ---
+            main_win = self.scene().main_window if self.scene() and hasattr(self.scene(), 'main_window') else None
+            
+            if main_win:
+                table1_obj = main_win.tables_data.get(self.relationship_data.table1_name)
+                table2_obj = main_win.tables_data.get(self.relationship_data.table2_name)
+
+                if table1_obj and table1_obj.graphic_item and table2_obj and table2_obj.graphic_item:
+                    t1_graphic = table1_obj.graphic_item
+                    t2_graphic = table2_obj.graphic_item
+                    
+                    old_p1 = self.start_attachment_point
+                    old_p2 = self.end_attachment_point
+
+                    p1_new = t1_graphic.get_attachment_point(
+                        t2_graphic,
+                        from_column_name=self.relationship_data.fk_column_name,
+                        hint_intermediate_x=self.relationship_data.vertical_segment_x_override
+                    )
+                    p2_new = t2_graphic.get_attachment_point(
+                        t1_graphic,
+                        to_column_name=self.relationship_data.pk_column_name,
+                        hint_intermediate_x=self.relationship_data.vertical_segment_x_override
+                    )
+
+                    # set_attachment_points will update stored points and call _build_path if they changed.
+                    self.set_attachment_points(p1_new, p2_new)
+
+                    # If attachment points (sides) did not change, set_attachment_points
+                    # would not have called _build_path. But the override did change, so we must.
+                    if old_p1 == p1_new and old_p2 == p2_new:
+                        self.prepareGeometryChange() # Path will change due to override
+                        self._build_path()           # Rebuild with new override
+                else:
+                    # Fallback if tables not found (should not happen in normal operation)
+                    self.prepareGeometryChange()
+                    self._build_path() 
+            else:
+                # Fallback if main_window not found
                 self.prepareGeometryChange()
-                self._build_path() 
-                self.update() 
+                self._build_path()
+            # --- END MODIFIED LIVE UPDATE ---
+            
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self.dragging_vertical_segment and self.isSelected():
-            from commands import SetRelationshipVerticalSegmentXCommand 
+            from commands import SetRelationshipVerticalSegmentXCommand # Keep local import
             main_window = self.scene().main_window if self.scene() else None
             if not main_window: 
                 self.dragging_vertical_segment = False; super().mouseReleaseEvent(event); return
@@ -706,284 +728,3 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
                                                              old_x_override, 
                                                              None)          
             main_window.undo_stack.push(command)
-
-
-class GroupGraphicItem(QGraphicsRectItem):
-    def __init__(self, group_data: GroupData, parent: QGraphicsItem | None = None):
-        super().__init__(parent) 
-        self.group_data = group_data
-        self.group_data.graphic_item = self
-
-        self.setRect(0, 0, self.group_data.width, self.group_data.height) 
-        self.setPos(self.group_data.x, self.group_data.y) 
-
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsScenePositionChanges, True) 
-        self.setAcceptHoverEvents(True)
-        self.setZValue(0) 
-
-        self._resizing_edge = None 
-        self._resize_start_mouse_pos = QPointF() 
-        self._initial_rect_on_resize = QRectF()  
-
-        self._move_start_pos_group = QPointF() 
-        self.child_tables_start_scene_positions = {} 
-
-
-    def get_resize_handle_rects(self) -> dict[Qt.Edge | Qt.Corner, QRectF]: 
-        rect = self.rect() 
-        s = GROUP_RESIZE_HANDLE_SIZE
-        s_half = s / 2.0
-
-        handles = {
-            Qt.Edge.TopEdge: QRectF(rect.left() + s, rect.top() - s_half, rect.width() - 2*s, s),
-            Qt.Edge.BottomEdge: QRectF(rect.left() + s, rect.bottom() - s_half, rect.width() - 2*s, s),
-            Qt.Edge.LeftEdge: QRectF(rect.left() - s_half, rect.top() + s, s, rect.height() - 2*s),
-            Qt.Edge.RightEdge: QRectF(rect.right() - s_half, rect.top() + s, s, rect.height() - 2*s),
-            Qt.Corner.TopLeftCorner: QRectF(rect.left() - s_half, rect.top() - s_half, s, s),
-            Qt.Corner.TopRightCorner: QRectF(rect.right() - s_half, rect.top() - s_half, s, s),
-            Qt.Corner.BottomLeftCorner: QRectF(rect.left() - s_half, rect.bottom() - s_half, s, s),
-            Qt.Corner.BottomRightCorner: QRectF(rect.right() - s_half, rect.bottom() - s_half, s, s),
-        }
-        return handles
-
-    @property
-    def title_area_height(self) -> float:
-        return GROUP_TITLE_AREA_HEIGHT
-
-
-    def get_title_rect(self) -> QRectF: 
-        return QRectF(0, 0, self.rect().width(), self.title_area_height)
-
-    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget=None):
-        border_color = self.group_data.border_color
-        title_bg_color = self.group_data.title_bg_color
-        title_text_color = self.group_data.title_text_color
-
-        if self.isSelected():
-            border_color = QColor(current_theme_settings.get("group_selected_border_color", QColor(0, 123, 255)))
-
-        pen = QPen(border_color, 1.5, Qt.PenStyle.DashLine)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush) 
-        main_rect_path = QPainterPath()
-        main_rect_path.addRoundedRect(self.rect(), GROUP_BORDER_RADIUS, GROUP_BORDER_RADIUS)
-        painter.drawPath(main_rect_path)
-
-        title_rect = self.get_title_rect()
-        title_path = QPainterPath()
-        title_path.addRoundedRect(title_rect, GROUP_BORDER_RADIUS, GROUP_BORDER_RADIUS)
-        rect_to_subtract = QRectF(0, title_rect.bottom() - GROUP_BORDER_RADIUS, title_rect.width(), GROUP_BORDER_RADIUS)
-        subtraction_path = QPainterPath()
-        subtraction_path.addRect(rect_to_subtract)
-        title_path = title_path.subtracted(subtraction_path)
-
-        painter.setBrush(QBrush(title_bg_color))
-        painter.setPen(Qt.PenStyle.NoPen) 
-        painter.drawPath(title_path)
-
-        painter.setPen(title_text_color)
-        font = painter.font()
-        font.setBold(True)
-        if "Arial" not in QFontDatabase.families():
-            font.setFamily(QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family())
-        else:
-            font.setFamily("Arial")
-        painter.setFont(font)
-        text_padding = 5 
-        title_text_rect = title_rect.adjusted(text_padding, text_padding / 2, -text_padding, -text_padding / 2)
-        painter.drawText(title_text_rect, Qt.AlignmentFlag.AlignCenter, self.group_data.name)
-
-        if self.isSelected():
-            painter.setBrush(border_color.lighter(120)) 
-            painter.setPen(QPen(border_color.darker(120), 1)) 
-            for edge, handle_rect in self.get_resize_handle_rects().items():
-                painter.drawRoundedRect(handle_rect, 2, 2) 
-
-
-    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        main_window = self.scene().main_window if self.scene() else None
-
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange and self.scene() and main_window:
-            for child_item in self.childItems(): 
-                if isinstance(child_item, TableGraphicItem):
-                    if hasattr(self.scene(), 'update_relationships_for_table'):
-                        self.scene().update_relationships_for_table(child_item.table_data.name)
-            return value 
-
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged and main_window:
-            from commands import MoveGroupCommand 
-
-            final_snapped_group_pos = QPointF(snap_to_grid(self.pos().x(), GRID_SIZE),
-                                              snap_to_grid(self.pos().y(), GRID_SIZE))
-            
-            if final_snapped_group_pos != self.pos(): 
-                self.setPos(final_snapped_group_pos) 
-            
-            if not self._move_start_pos_group.isNull() and final_snapped_group_pos != self._move_start_pos_group:
-                tables_original_scene_pos_details = []
-                for table_name, start_scene_pos in self.child_tables_start_scene_positions.items():
-                    tables_original_scene_pos_details.append({"name": table_name, "old_pos": start_scene_pos})
-
-                command = MoveGroupCommand(main_window, self.group_data,
-                                           self._move_start_pos_group, 
-                                           final_snapped_group_pos,    
-                                           tables_original_scene_pos_details) 
-                main_window.undo_stack.push(command)
-            
-            self._move_start_pos_group = QPointF() 
-            self.child_tables_start_scene_positions.clear()
-
-
-        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
-            self.update() 
-
-        return super().itemChange(change, value)
-
-    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent):
-        if not self.isSelected():
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            super().hoverMoveEvent(event)
-            return
-
-        self._resizing_edge = None 
-        cursor_set = False
-        for edge, handle_rect in self.get_resize_handle_rects().items():
-            if handle_rect.contains(event.pos()): 
-                self._resizing_edge = edge
-                if edge == Qt.Edge.TopEdge or edge == Qt.Edge.BottomEdge:
-                    self.setCursor(Qt.CursorShape.SizeVerCursor)
-                elif edge == Qt.Edge.LeftEdge or edge == Qt.Edge.RightEdge:
-                    self.setCursor(Qt.CursorShape.SizeHorCursor)
-                elif edge == Qt.Corner.TopLeftCorner or edge == Qt.Corner.BottomRightCorner:
-                    self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-                elif edge == Qt.Corner.TopRightCorner or edge == Qt.Corner.BottomLeftCorner:
-                    self.setCursor(Qt.CursorShape.SizeBDiagCursor)
-                cursor_set = True
-                break
-        
-        if not cursor_set: 
-            self.setCursor(Qt.CursorShape.ArrowCursor) 
-        super().hoverMoveEvent(event)
-
-    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        main_window = self.scene().main_window if self.scene() else None
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self.isSelected() and self._resizing_edge is not None: 
-                self._resize_start_mouse_pos = event.scenePos() 
-                self._initial_rect_on_resize = self.sceneBoundingRect() 
-                event.accept()
-                return
-            else: 
-                self._move_start_pos_group = QPointF(snap_to_grid(self.scenePos().x(), GRID_SIZE),
-                                                     snap_to_grid(self.scenePos().y(), GRID_SIZE))
-                self.child_tables_start_scene_positions.clear()
-                if main_window:
-                    for child_item in self.childItems(): 
-                        if isinstance(child_item, TableGraphicItem):
-                            self.child_tables_start_scene_positions[child_item.table_data.name] = child_item.scenePos()
-        
-        self._resizing_edge = None 
-        super().mousePressEvent(event)
-
-
-    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-        if self._resizing_edge is not None and self.isSelected():
-            current_mouse_pos_scene = event.scenePos()
-            delta = current_mouse_pos_scene - self._resize_start_mouse_pos 
-
-            new_rect_scene = QRectF(self._initial_rect_on_resize) 
-            if self._resizing_edge == Qt.Edge.TopEdge or self._resizing_edge == Qt.Corner.TopLeftCorner or self._resizing_edge == Qt.Corner.TopRightCorner:
-                new_rect_scene.setTop(self._initial_rect_on_resize.top() + delta.y())
-            if self._resizing_edge == Qt.Edge.BottomEdge or self._resizing_edge == Qt.Corner.BottomLeftCorner or self._resizing_edge == Qt.Corner.BottomRightCorner:
-                new_rect_scene.setBottom(self._initial_rect_on_resize.bottom() + delta.y())
-            if self._resizing_edge == Qt.Edge.LeftEdge or self._resizing_edge == Qt.Corner.TopLeftCorner or self._resizing_edge == Qt.Corner.BottomLeftCorner:
-                new_rect_scene.setLeft(self._initial_rect_on_resize.left() + delta.x())
-            if self._resizing_edge == Qt.Edge.RightEdge or self._resizing_edge == Qt.Corner.TopRightCorner or self._resizing_edge == Qt.Corner.BottomRightCorner:
-                new_rect_scene.setRight(self._initial_rect_on_resize.right() + delta.x())
-
-            if new_rect_scene.width() < MIN_GROUP_WIDTH:
-                if self._resizing_edge == Qt.Edge.LeftEdge or self._resizing_edge == Qt.Corner.TopLeftCorner or self._resizing_edge == Qt.Corner.BottomLeftCorner:
-                    new_rect_scene.setLeft(new_rect_scene.right() - MIN_GROUP_WIDTH)
-                else: 
-                    new_rect_scene.setRight(new_rect_scene.left() + MIN_GROUP_WIDTH)
-            
-            if new_rect_scene.height() < MIN_GROUP_HEIGHT:
-                if self._resizing_edge == Qt.Edge.TopEdge or self._resizing_edge == Qt.Corner.TopLeftCorner or self._resizing_edge == Qt.Corner.TopRightCorner:
-                    new_rect_scene.setTop(new_rect_scene.bottom() - MIN_GROUP_HEIGHT)
-                else: 
-                    new_rect_scene.setBottom(new_rect_scene.top() + MIN_GROUP_HEIGHT)
-
-            snapped_top_left_x = snap_to_grid(new_rect_scene.left(), GRID_SIZE)
-            snapped_top_left_y = snap_to_grid(new_rect_scene.top(), GRID_SIZE)
-            snapped_width = snap_to_grid(new_rect_scene.width(), GRID_SIZE)
-            snapped_height = snap_to_grid(new_rect_scene.height(), GRID_SIZE)
-            final_width = max(MIN_GROUP_WIDTH, snapped_width)
-            final_height = max(MIN_GROUP_HEIGHT, snapped_height)
-            
-            self.prepareGeometryChange()
-            self.setPos(snapped_top_left_x, snapped_top_left_y)
-            self.setRect(0, 0, final_width, final_height) 
-
-            if hasattr(self.scene(), 'handle_group_resize_visual_feedback'):
-                 self.scene().handle_group_resize_visual_feedback(self) 
-            self.update() 
-            event.accept()
-            return
-        
-        super().mouseMoveEvent(event) 
-
-
-    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
-        if self._resizing_edge is not None and self.isSelected(): 
-            main_window = self.scene().main_window if self.scene() else None
-            if main_window:
-                from commands import ResizeGroupCommand 
-                new_rect_scene = self.sceneBoundingRect() 
-                old_rect_scene = self._initial_rect_on_resize 
-
-                if old_rect_scene != new_rect_scene : 
-                    command = ResizeGroupCommand(main_window, self.group_data, old_rect_scene, new_rect_scene)
-                    main_window.undo_stack.push(command)
-            
-            self._resizing_edge = None
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            event.accept()
-            return
-
-        if self._resizing_edge is None and not self._move_start_pos_group.isNull(): 
-            self.child_tables_start_scene_positions.clear() 
-
-        super().mouseReleaseEvent(event)
-
-    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
-        if event.button() == Qt.MouseButton.LeftButton and self.get_title_rect().contains(event.pos()): 
-            main_window = self.scene().main_window if self.scene() else None
-            if main_window:
-                from commands import RenameGroupCommand 
-                current_name = self.group_data.name
-                text, ok = QInputDialog.getText(main_window, "Edit Group Name", "Group Name:", 
-                                                text=current_name)
-                if ok and text and text.strip() != current_name:
-                    new_name = text.strip()
-                    if hasattr(main_window, 'groups_data') and new_name in main_window.groups_data and main_window.groups_data[new_name] is not self.group_data:
-                        QMessageBox.warning(main_window, "Name Conflict", f"A group with the name '{new_name}' already exists.") 
-                    else:
-                        command = RenameGroupCommand(main_window, self.group_data, current_name, new_name)
-                        main_window.undo_stack.push(command)
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
-
-    def contains_table(self, table_item: TableGraphicItem) -> bool:
-        return table_item.parentItem() == self
-
-    def get_contained_tables(self) -> list[TableGraphicItem]: 
-        contained = []
-        for item in self.childItems(): 
-            if isinstance(item, TableGraphicItem):
-                contained.append(item)
-        return contained
-

@@ -146,10 +146,36 @@ def update_relationship_graphic_path_impl(window, relationship_data): # Renamed 
     t1_graphic = table1_obj.graphic_item
     t2_graphic = table2_obj.graphic_item
 
-    p1 = t1_graphic.get_attachment_point(t2_graphic, from_column_name=relationship_data.fk_column_name)
-    p2 = t2_graphic.get_attachment_point(t1_graphic, to_column_name=relationship_data.pk_column_name)
+    # Step 1: Get initial attachment points (without hint, based on relative table positions)
+    p1_initial = t1_graphic.get_attachment_point(t2_graphic, from_column_name=relationship_data.fk_column_name)
+    p2_initial = t2_graphic.get_attachment_point(t1_graphic, to_column_name=relationship_data.pk_column_name)
 
-    relationship_data.graphic_item.set_attachment_points(p1, p2)
+    # Step 2: Calculate intermediate_x_scene
+    intermediate_x_scene = 0.0
+    if relationship_data.vertical_segment_x_override is not None:
+        intermediate_x_scene = relationship_data.vertical_segment_x_override
+    else:
+        min_h_seg = constants.MIN_HORIZONTAL_SEGMENT
+        # Determine default exit direction based on table centers if tables are horizontally very close
+        s_exits_right_default = t1_graphic.sceneBoundingRect().center().x() < t2_graphic.sceneBoundingRect().center().x()
+
+        calc_inter_x = 0.0
+        if abs(p1_initial.x() - p2_initial.x()) < min_h_seg * 1.5:
+            calc_inter_x = p1_initial.x() + (min_h_seg if s_exits_right_default else -min_h_seg)
+        else:
+            # Use table centers for "far apart" case to make vertical segment placement more neutral
+            calc_inter_x = (t1_graphic.sceneBoundingRect().center().x() + t2_graphic.sceneBoundingRect().center().x()) / 2.0
+        intermediate_x_scene = snap_to_grid(calc_inter_x, constants.GRID_SIZE / 2)
+
+    # Step 3: Get final attachment points using the calculated intermediate_x_scene as a hint
+    p1_final = t1_graphic.get_attachment_point(t2_graphic, 
+                                               from_column_name=relationship_data.fk_column_name, 
+                                               hint_intermediate_x=intermediate_x_scene)
+    p2_final = t2_graphic.get_attachment_point(t1_graphic, 
+                                               to_column_name=relationship_data.pk_column_name, 
+                                               hint_intermediate_x=intermediate_x_scene)
+
+    relationship_data.graphic_item.set_attachment_points(p1_final, p2_final)
     relationship_data.graphic_item.update_tooltip_and_paint() 
 
 

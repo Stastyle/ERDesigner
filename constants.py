@@ -34,14 +34,6 @@ DEFAULT_COLUMN_DATA_TYPES = [
     "FLOAT", "DOUBLE PRECISION", "TIME", "JSON"
 ]
 
-# --- New Constants for Groups ---
-GROUP_TITLE_AREA_HEIGHT = 25
-GROUP_RESIZE_HANDLE_SIZE = 10       # Size of the square resize handles
-MIN_GROUP_WIDTH = GRID_SIZE * 8     # Minimum width for a group
-MIN_GROUP_HEIGHT = GRID_SIZE * 6    # Minimum height for a group (enough for title + some content)
-GROUP_BORDER_RADIUS = 5
-CSV_GROUP_DEF_MARKER = "GROUP_DEFINITION" # Marker for groups in CSV
-
 # --- Globally Accessible Current Settings (to be updated from config/UI) ---
 current_theme_settings = {} 
 
@@ -78,11 +70,6 @@ light_theme_colors = {
     "cardinality_text_color": QColor(73, 80, 87),
     "dialog_input_bg": QColor("#FFFFFF"),
     "dialog_input_border": QColor("#CED4DA"),
-    # Group Colors - Light Theme
-    "group_border_color": QColor(180, 180, 180),
-    "group_title_bg_color": QColor(220, 220, 220),
-    "group_title_text_color": QColor(50, 50, 50),
-    "group_selected_border_color": QColor(0, 123, 255), # Same as button_checked_bg
 }
 
 dark_theme_colors = {
@@ -109,9 +96,4 @@ dark_theme_colors = {
     "cardinality_text_color": QColor(206, 212, 218),
     "dialog_input_bg": QColor("#343A40"),
     "dialog_input_border": QColor("#6C757D"),
-    # Group Colors - Dark Theme
-    "group_border_color": QColor(100, 100, 100),
-    "group_title_bg_color": QColor(60, 60, 60),
-    "group_title_text_color": QColor(220, 220, 220),
-    "group_selected_border_color": QColor(0, 123, 255), # Same as button_checked_bg
 }

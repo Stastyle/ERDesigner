@@ -27,8 +27,9 @@ def main():
     """
     app = QApplication(sys.argv)
     
-    # It's good practice to set application name and version if distributing
-    # app.setApplicationName("ERD Design Tool")
+    # Setting application name and organization can be useful for QSettings or platform integration
+    app.setOrganizationName("YourOrganizationName") # Or skip if not applicable
+    app.setApplicationName("ERD Design Tool")
     # app.setApplicationVersion("0.1.0")
 
     try:

@@ -20,13 +20,12 @@ from PyQt6.QtGui import (
 # Import from other modules
 import constants
 from utils import get_standard_icon, snap_to_grid
-from data_models import Table, Column, Relationship, GroupData 
-from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem, GroupGraphicItem 
+from data_models import Table, Column, Relationship
+from gui_items import TableGraphicItem, OrthogonalRelationshipPathItem
 from canvas_scene import ERDGraphicsScene
 from commands import (
     AddTableCommand, DeleteRelationshipCommand, CreateRelationshipCommand,
-    DeleteTableCommand, EditTableCommand,
-    AddGroupCommand, SetRelationshipVerticalSegmentXCommand # Keep SetRelationshipVerticalSegmentXCommand
+    DeleteTableCommand, EditTableCommand, SetRelationshipVerticalSegmentXCommand
     # Removed: AddOrthogonalBendCommand, MoveOrthogonalBendCommand, DeleteOrthogonalBendCommand
     # Removed: MoveCentralVerticalSegmentCommand (replaced by SetRelationshipVerticalSegmentXCommand)
 )
@@ -70,8 +69,7 @@ from main_window_file_operations import (
 )
 from main_window_explorer_utils import (
     populate_diagram_explorer_util, on_explorer_item_double_clicked_util,
-    toggle_diagram_explorer_util, ITEM_TYPE_TABLE, ITEM_TYPE_COLUMN,
-    ITEM_TYPE_RELATIONSHIP, ITEM_TYPE_CATEGORY, ITEM_TYPE_GROUP, ITEM_TYPE_GROUP_TABLE 
+    toggle_diagram_explorer_util, ITEM_TYPE_TABLE, ITEM_TYPE_COLUMN, ITEM_TYPE_RELATIONSHIP, ITEM_TYPE_CATEGORY
 )
 from main_window_dialog_handlers import (
     open_default_colors_dialog_handler, open_canvas_settings_dialog_handler,
@@ -122,10 +120,8 @@ class ERDCanvasWindow(QMainWindow):
 
         self.tables_data = {}  
         self.relationships_data = []  
-        self.groups_data = {} 
 
         self.drawing_relationship_mode = False 
-        self.drawing_group_mode_active = False 
 
         self.scene = ERDGraphicsScene(self) 
         self.scene.setSceneRect(0, 0,
@@ -189,95 +185,52 @@ class ERDCanvasWindow(QMainWindow):
     def reset_drawing_mode(self): reset_drawing_mode_impl(self)
     
     def handle_add_table_button(self, table_name_prop=None, columns_prop=None, pos=None, width_prop=None, body_color_hex=None, header_color_hex=None, from_undo_redo=False):
-        return handle_add_table_button_impl(self, table_name_prop, columns_prop, pos, width_prop, body_color_hex, header_color_hex, from_undo_redo)
-    
-    def handle_add_group_button(self, group_name_prop=None, pos=None, size=None, from_drawing_mode=False): 
-        group_data_result = None
-        group_name_to_use = group_name_prop
-        
-        if not group_name_to_use and not from_drawing_mode: 
-            text, ok = QInputDialog.getText(self, "New Group", "Enter group name:")
-            if not ok or not text.strip():
-                return None 
-            group_name_to_use = text.strip()
-        elif from_drawing_mode and not group_name_to_use: 
-            text, ok = QInputDialog.getText(self, "New Group", "Enter group name for the drawn area:")
-            if not ok or not text.strip():
-                self.scene.cancel_active_drawing_modes() 
-                return None
-            group_name_to_use = text.strip()
+        """
+        Wrapper to call the implementation for adding a table.
+        This method maintains the older signature for compatibility with callers like CSV import
+        and scene interactions, but bundles arguments appropriately for handle_add_table_button_impl.
+        """
+        table_props_to_pass = None
+        interactive_pos_to_pass = None
 
+        if table_name_prop:  # Indicates a programmatic call (e.g., CSV import)
+            table_props_to_pass = {
+                "name": table_name_prop,
+                "columns": columns_prop if columns_prop is not None else [],
+                "pos": pos,  # pos from CSV is the actual desired position
+                "width": width_prop,
+                "body_color_hex": body_color_hex,
+                "header_color_hex": header_color_hex
+            }
+        elif pos:  # Interactive call with a suggested position (e.g., double-click on canvas)
+            interactive_pos_to_pass = pos
 
-        if not group_name_to_use: 
-            QMessageBox.warning(self, "Warning", "Group name cannot be empty.")
-            self.scene.cancel_active_drawing_modes()
-            return None
-        
-        if group_name_to_use in self.groups_data:
-            QMessageBox.warning(self, "Warning", f"Group with name '{group_name_to_use}' already exists.")
-            self.scene.cancel_active_drawing_modes()
-            return None
+        """
+        Wrapper to call the implementation for adding a table.
+        This method maintains the older signature for compatibility with callers like CSV import
+        and scene interactions, but bundles arguments appropriately for handle_add_table_button_impl.
+        """
+        table_props_to_pass = None
+        interactive_pos_to_pass = None
 
-        final_x, final_y, final_width, final_height = 0,0,0,0
+        if table_name_prop:  # Indicates a programmatic call (e.g., CSV import)
+            table_props_to_pass = {
+                "name": table_name_prop,
+                "columns": columns_prop if columns_prop is not None else [],
+                "pos": pos,  # pos from CSV is the actual desired position
+                "width": width_prop,
+                "body_color_hex": body_color_hex,
+                "header_color_hex": header_color_hex
+            }
+        elif pos:  # Interactive call with a suggested position (e.g., double-click on canvas)
+            interactive_pos_to_pass = pos
 
-        if pos and size: 
-            final_x = snap_to_grid(pos.x(), constants.GRID_SIZE)
-            final_y = snap_to_grid(pos.y(), constants.GRID_SIZE)
-            final_width = snap_to_grid(size.width(), constants.GRID_SIZE)
-            final_height = snap_to_grid(size.height(), constants.GRID_SIZE)
-        else: 
-            visible_rect_center = self.view.mapToScene(self.view.viewport().rect().center())
-            default_width = constants.MIN_GROUP_WIDTH * 2
-            default_height = constants.MIN_GROUP_HEIGHT * 2
-            final_x = snap_to_grid(visible_rect_center.x() - default_width / 2, constants.GRID_SIZE)
-            final_y = snap_to_grid(visible_rect_center.y() - default_height / 2, constants.GRID_SIZE)
-            final_width = default_width
-            final_height = default_height
-            
-        final_width = max(constants.MIN_GROUP_WIDTH, final_width)
-        final_height = max(constants.MIN_GROUP_HEIGHT, final_height)
-
-        group_data = GroupData(name=group_name_to_use, x=final_x, y=final_y, 
-                               width=final_width, height=final_height)
-        
-        command = AddGroupCommand(self, group_data)
-        self.undo_stack.push(command)
-        
-        group_data_result = self.groups_data.get(group_name_to_use)
-
-        if from_drawing_mode: 
-            self.scene.cancel_active_drawing_modes()
-            
-        return group_data_result
-
-    def toggle_group_drawing_mode(self, checked):
-        self.drawing_group_mode_active = checked
-        self.scene.drawing_group_mode = checked 
-
-        if hasattr(self, 'actionAddGroup') and self.actionAddGroup.isChecked() != checked:
-            self.actionAddGroup.setChecked(checked) 
-
-        if checked:
-            self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
-            QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
-            if self.drawing_relationship_mode:
-                self.reset_drawing_mode() 
-        else: 
-            if self.scene.drawing_group_mode: 
-                self.scene.cancel_active_drawing_modes() 
-            
-            if QApplication.overrideCursor() is not None: 
-                 QApplication.restoreOverrideCursor()
-            if self.view.dragMode() == QGraphicsView.DragMode.NoDrag:
-                 self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-
-
-    def update_table_group_references(self, old_group_name, new_group_name):
-        for table_data in self.tables_data.values():
-            if table_data.group_name == old_group_name:
-                table_data.group_name = new_group_name
-        self.populate_diagram_explorer() 
-
+        return handle_add_table_button_impl(
+            self,
+            table_props=table_props_to_pass,
+            from_undo_redo=from_undo_redo,
+            interactive_pos=interactive_pos_to_pass
+        )    
 
     def finalize_relationship_drawing(self, source_table_data, source_column_data, dest_table_data, dest_column_data):
         finalize_relationship_drawing_impl(self, source_table_data, source_column_data, dest_table_data, dest_column_data)
@@ -343,4 +296,3 @@ if __name__ == '__main__':
     window = ERDCanvasWindow()
     window.show()
     sys.exit(app.exec())
-

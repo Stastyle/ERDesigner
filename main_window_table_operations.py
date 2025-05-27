@@ -9,30 +9,38 @@ from commands import AddTableCommand, EditTableCommand # Assuming commands.py is
 import constants
 from utils import snap_to_grid
 
-def handle_add_table_button_impl(window, table_name_prop=None, columns_prop=None, pos=None, width_prop=None, body_color_hex=None, header_color_hex=None, from_undo_redo=False):
+def handle_add_table_button_impl(window, table_props=None, from_undo_redo=False, interactive_pos=None):
     """
     Handles the logic for adding a new table, either via dialog or programmatically (e.g., CSV import, undo/redo).
+    'table_props' is a dictionary for programmatic addition, expected to contain keys like
+    'name', 'columns', 'pos', 'width', 'body_color_hex', 'header_color_hex'.
+    'interactive_pos' is an optional QPointF to suggest initial position for interactive dialog-based addition.
     Returns the created/retrieved Table object or None.
     """
     table_data_result = None
+    dialog_table_name = ""
+    dialog_columns = []
+    dialog_body_color_hex = None
+    dialog_header_color_hex = None
+    pos_to_use = None
+    width_to_use = constants.DEFAULT_TABLE_WIDTH
 
     if not from_undo_redo:
-        dialog_table_name = ""
-        dialog_columns = []
-        dialog_body_color_hex = None
-        dialog_header_color_hex = None
+        if table_props: # Programmatic addition (e.g., CSV import or direct call with properties)
+            dialog_table_name = table_props.get("name", "")
+            dialog_columns = table_props.get("columns", [])
+            pos_to_use = table_props.get("pos") # QPointF or None
+            width_to_use = table_props.get("width", constants.DEFAULT_TABLE_WIDTH)
+            dialog_body_color_hex = table_props.get("body_color_hex")
+            dialog_header_color_hex = table_props.get("header_color_hex")
 
-        if table_name_prop: # Programmatic addition (e.g., CSV import)
-            dialog_table_name = table_name_prop
-            dialog_columns = columns_prop if columns_prop else []
-            dialog_body_color_hex = body_color_hex
-            dialog_header_color_hex = header_color_hex
-            print(f"Programmatic add_table for '{dialog_table_name}' with pos: {pos}")
+            print(f"Programmatic add_table for '{dialog_table_name}' with pos: {pos_to_use}")
             if not dialog_table_name:
                 print("Error: Programmatic table add attempt with no name.")
                 return None
             # The AddTableCommand will handle if the table already exists (for replacement or error)
         else: # Interactive addition via dialog
+            pos_to_use = interactive_pos # Use position passed for interactive mode, if any
             # Use theme defaults or user-set defaults for initial dialog colors
             initial_body_color = window.user_default_table_body_color or window.current_theme_settings["default_table_body_color"]
             initial_header_color = window.user_default_table_header_color or window.current_theme_settings["default_table_header_color"]
@@ -51,23 +59,21 @@ def handle_add_table_button_impl(window, table_name_prop=None, columns_prop=None
 
         # Determine position for the new table
         default_x, default_y = 0, 0
-        if pos: # Provided position (e.g., from CSV or specific placement)
-            default_x = snap_to_grid(pos.x(), constants.GRID_SIZE)
-            default_y = snap_to_grid(pos.y(), constants.GRID_SIZE)
+        if pos_to_use: # Provided position (e.g., from table_props or interactive_pos)
+            default_x = snap_to_grid(pos_to_use.x(), constants.GRID_SIZE)
+            default_y = snap_to_grid(pos_to_use.y(), constants.GRID_SIZE)
             print(f"  Using provided pos for '{dialog_table_name}': ({default_x}, {default_y})")
         else: # Default position (center of view)
             visible_rect_center = window.view.mapToScene(window.view.viewport().rect().center())
-            table_width_for_centering = width_prop if width_prop is not None else constants.DEFAULT_TABLE_WIDTH
+            table_width_for_centering = width_to_use
             default_x = snap_to_grid(visible_rect_center.x() - table_width_for_centering / 2, constants.GRID_SIZE)
             default_y = snap_to_grid(visible_rect_center.y() - constants.TABLE_HEADER_HEIGHT / 2, constants.GRID_SIZE) # Approx center Y
             print(f"  Using default/view center pos for '{dialog_table_name}': ({default_x}, {default_y})")
-
-        table_width_to_use = width_prop if width_prop is not None else constants.DEFAULT_TABLE_WIDTH
         
         # Create Table data object
         table_data = Table(name=dialog_table_name,
                            x=default_x, y=default_y,
-                           width=table_width_to_use,
+                           width=width_to_use,
                            body_color_hex=dialog_body_color_hex,
                            header_color_hex=dialog_header_color_hex)
         for col_data in dialog_columns: # col_data should be Column objects or dicts that Column can take
@@ -92,13 +98,16 @@ def handle_add_table_button_impl(window, table_name_prop=None, columns_prop=None
     else: # from_undo_redo is True, means the command itself is calling this (or a similar internal method)
           # The command's redo/undo logic should handle re-populating window.tables_data and scene directly.
           # This path might not be strictly necessary if commands are self-contained.
-          # However, if AddTableCommand's redo calls a method like this, it would retrieve the existing object.
-        table_data_result = window.tables_data.get(table_name_prop)
+          # If table_props is passed during undo/redo, it should contain the name.
+        table_name_for_retrieval = table_props.get("name") if table_props else None
+        if not table_name_for_retrieval:
+            print(f"Undo/Redo Error: No table name provided to retrieve.")
+            return None
+        table_data_result = window.tables_data.get(table_name_for_retrieval)
         if table_data_result:
-            print(f"Undo/Redo: Retrieved table '{table_name_prop}'")
+            print(f"Undo/Redo: Retrieved table '{table_name_for_retrieval}'")
         else:
-            print(f"Undo/Redo Error: Could not retrieve table '{table_name_prop}'")
-
+            print(f"Undo/Redo Error: Could not retrieve table '{table_name_for_retrieval}'")
 
     return table_data_result
 

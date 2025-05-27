@@ -50,7 +50,6 @@ class Table:
         self.y = snap_to_grid(y, GRID_SIZE) # Absolute scene Y
         self.width = snap_to_grid(width, GRID_SIZE)
         self.graphic_item = None
-        self.group_name = None 
 
         default_body_qcolor = QColor(current_theme_settings.get("default_table_body_color", QColor(Qt.GlobalColor.white)))
         self.body_color = default_body_qcolor
@@ -119,49 +118,6 @@ class Relationship:
         for k, v in self.__dict__.items():
             if k == 'graphic_item':
                 setattr(result, k, None)
-            else:
-                setattr(result, k, copy.deepcopy(v, memo))
-        return result
-
-class GroupData:
-    def __init__(self, name, x=0, y=0, width=400, height=300,
-                 border_color_hex=None, title_bg_color_hex=None, title_text_color_hex=None):
-        self.name = name
-        self.x = snap_to_grid(x, GRID_SIZE)
-        self.y = snap_to_grid(y, GRID_SIZE)
-        self.width = snap_to_grid(width, GRID_SIZE)
-        self.height = snap_to_grid(height, GRID_SIZE)
-        self.table_names = []  
-        self.graphic_item = None  
-
-        self.border_color = QColor(border_color_hex) if border_color_hex and QColor.isValidColor(border_color_hex) else QColor(current_theme_settings.get("group_border_color", QColor(150, 150, 150)))
-        self.title_bg_color = QColor(title_bg_color_hex) if title_bg_color_hex and QColor.isValidColor(title_bg_color_hex) else QColor(current_theme_settings.get("group_title_bg_color", QColor(200, 200, 200)))
-        self.title_text_color = QColor(title_text_color_hex) if title_text_color_hex and QColor.isValidColor(title_text_color_hex) else QColor(current_theme_settings.get("group_title_text_color", QColor(0,0,0)))
-
-
-    def add_table(self, table_name: str):
-        if table_name not in self.table_names:
-            self.table_names.append(table_name)
-
-    def remove_table(self, table_name: str):
-        if table_name in self.table_names:
-            self.table_names.remove(table_name)
-
-    def __str__(self):
-        return f"Group: {self.name} (Tables: {len(self.table_names)})"
-
-    def __deepcopy__(self, memo):
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-
-        for k, v in self.__dict__.items():
-            if k == 'graphic_item':
-                setattr(result, k, None) 
-            elif k in ['border_color', 'title_bg_color', 'title_text_color']:
-                setattr(result, k, QColor(v)) 
-            elif k == 'table_names':
-                setattr(result, k, copy.deepcopy(v, memo)) 
             else:
                 setattr(result, k, copy.deepcopy(v, memo))
         return result
