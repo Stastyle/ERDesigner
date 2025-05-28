@@ -9,29 +9,43 @@ The ERD Design Tool is a PyQt6-based desktop application that allows users to vi
 * **Visual ERD Creation and Editing:**
     * Add, delete, and edit tables and columns.
     * Create and manage relationships between tables.
+    * Visual cardinality representation (Crow's Foot symbols and/or text, user-selectable).
+    * Data type mismatch warnings with resolution options when creating relationships.
     * Support for various data types for columns.
     * Specify Primary Keys (PK) and Foreign Keys (FK).
+    * Copy and paste tables (including via Ctrl+C/Ctrl+V).
+    * Duplicate column name validation during table editing.
 * **Intuitive User Interface:**
     * Graphical canvas with drag-and-drop support for tables.
     * Grid and Snap to Grid functionality for easy arrangement.
     * Zoom and scroll capabilities for the canvas.
     * Floating Action Button (FAB) for quick item addition.
     * Diagram Explorer to display the diagram structure in a tree view.
+    * SQL Preview panel (auto-updates).
+    * Notes pane for diagram-specific annotations (saved with the diagram).
+    * Context menus for quick actions on tables (Edit, Copy, Delete) and canvas (Add Table, Add Relationship, Paste Table).
 * **Customization:**
     * Selectable themes (Light/Dark).
     * Set default colors for table bodies and headers.
     * Customize colors for individual tables.
     * Adjust canvas size.
     * Manage the list of available data types for columns.
+    * Configurable cardinality display (Text, Symbols, or Both).
+    * Delete custom colors from the color palette (via right-click).
 * **File and Data Management:**
-    * Save and open diagrams (currently in an internal CSV format).
-    * Import diagrams from CSV files.
-    * Export diagrams to CSV files.
-    * Zoom to fit all imported tables after CSV import.
+    * Save and open diagrams in a custom `.erd` format (internally CSV-based).
+    * Import diagrams from `.erd` files.
+    * Export diagrams to `.erd` files.
+    * Export diagram to SQL DDL (CREATE TABLE, ALTER TABLE for FKs).
+    * Import basic SQL DDL to generate a diagram.
+    * Zoom to fit all imported tables after import.
+    * Prompt to save unsaved changes before closing, opening a new diagram, or importing.
 * **Undo/Redo Functionality:**
-    * Support for undoing and redoing most operations.
+    * Support for undoing and redoing most operations, including default color changes and notes editing.
 * **Dynamic UI Element Positioning:**
     * The Floating Action Button dynamically adjusts its position based on window size and the Diagram Explorer's docking state.
+* **Keyboard Shortcuts:**
+    * Common operations like Copy (Ctrl+C), Paste (Ctrl+V), Delete, Undo (Ctrl+Z), Redo (Ctrl+Y/Ctrl+Shift+Z) are supported.
 
 ## Planned Features (from `erd_tool_improvements_he`)
 
@@ -41,7 +55,7 @@ The ERD Design Tool is a PyQt6-based desktop application that allows users to vi
     * Mini-map for the canvas.
     * Snap to other items.
     * Zoom to selection.
-    * Customization of relationship line styles and cardinality symbols.
+    * Customization of relationship line styles.
     * Clearer visual distinction for PK/FK columns.
 * **Core Functionality:**
     * Generate SQL scripts (CREATE TABLE, ALTER TABLE).
@@ -101,6 +115,8 @@ The project is organized into several Python files, each responsible for a diffe
 * `constants.py`: Contains global constants used throughout the application.
 * `utils.py`: Contains general utility functions.
 * `config.ini`: The application's configuration file (auto-generated on first run).
+* `sql_generator.py`: Logic for generating SQL DDL from the diagram.
+* `sql_parser.py`: Logic for parsing SQL DDL for import.
 * `icon.ico`: The application's icon file.
 * **`main_window` Modules:**
     * `main_window_actions.py`: Implementations for actions like save, open, delete.
