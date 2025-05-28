@@ -201,7 +201,11 @@ class EditTableCommand(QUndoCommand):
         
         self.old_columns_data = copy.deepcopy(old_properties["columns"])
         self.new_columns_data = copy.deepcopy(new_properties["columns"])
+    def redo(self):
+        self._apply_properties(self.new_name, self.new_body_color_hex, self.new_header_color_hex, self.new_columns_data)
 
+    def undo(self):
+        self._apply_properties(self.old_name, self.old_body_color_hex, self.old_header_color_hex, self.old_columns_data)
 
     def _apply_properties(self, name_to_apply, body_color_hex_to_apply, header_color_hex_to_apply, columns_to_apply_list):
         original_name_of_live_object = self.table_data_object.name 
@@ -209,93 +213,108 @@ class EditTableCommand(QUndoCommand):
 
         if name_changed:
             if name_to_apply in self.main_window.tables_data and self.main_window.tables_data[name_to_apply] is not self.table_data_object:
+                # This case should ideally be prevented by dialog validation
+                print(f"Error: Target name '{name_to_apply}' already exists and is a different object.")
                 return False 
             
+            # Update the tables_data dictionary key
             if original_name_of_live_object in self.main_window.tables_data:
                 del self.main_window.tables_data[original_name_of_live_object]
             self.main_window.tables_data[name_to_apply] = self.table_data_object
             
+            # Update the table object's name
             self.table_data_object.name = name_to_apply 
             
+            # Update relationships and FK references in other tables
             self.main_window.update_relationship_table_names(original_name_of_live_object, name_to_apply)
             self.main_window.update_fk_references_to_table(original_name_of_live_object, name_to_apply)
 
+        # Apply color changes
         self.table_data_object.body_color = QColor(body_color_hex_to_apply)
         self.table_data_object.header_color = QColor(header_color_hex_to_apply)
 
+        # Determine which set of columns represents the state *before* these properties are applied
+        # For redo, old_columns_data is "before". For undo, new_columns_data is "before".
         columns_state_before_this_apply = self.old_columns_data if name_to_apply == self.new_name else self.new_columns_data
 
+        # Handle PK changes: if a PK is removed or renamed, update FKs in other tables that reference it.
         old_pk_map = {col.name: col for col in columns_state_before_this_apply if col.is_pk}
         new_pk_map = {col.name: col for col in columns_to_apply_list if col.is_pk}
 
         for old_pk_name, old_pk_col_obj in old_pk_map.items():
-            if old_pk_name not in new_pk_map or not new_pk_map[old_pk_name].is_pk : 
+            if old_pk_name not in new_pk_map or not new_pk_map[old_pk_name].is_pk : # PK removed or no longer PK
+                # Check if it was renamed to another PK
                 is_renamed_and_still_pk = False
                 if len(old_pk_map) == 1 and len(new_pk_map) == 1: 
                     new_pk_name_check = list(new_pk_map.keys())[0]
-                    if old_pk_name != new_pk_name_check : 
-                        is_renamed_and_still_pk = True
+                    if old_pk_name != new_pk_name_check : # Renamed
+                        is_renamed_and_still_pk = True 
                 
-                if not is_renamed_and_still_pk: 
-                     self.main_window.update_fk_references_to_pk(name_to_apply, old_pk_name, None) 
+                if not is_renamed_and_still_pk: # Truly removed or changed to non-PK
+                     self.main_window.update_fk_references_to_pk(name_to_apply, old_pk_name, None) # Pass current table name
 
         for new_pk_name, new_pk_col_obj in new_pk_map.items():
             original_old_pk_name_for_this_new_pk = None
-            if new_pk_name not in old_pk_map: 
-                if len(old_pk_map) == 1 and len(new_pk_map) == 1:
+            if new_pk_name not in old_pk_map: # New PK or renamed PK
+                if len(old_pk_map) == 1 and len(new_pk_map) == 1: # Potentially renamed
                      original_old_pk_name_for_this_new_pk = list(old_pk_map.keys())[0]
             
             if original_old_pk_name_for_this_new_pk and original_old_pk_name_for_this_new_pk != new_pk_name:
+                # This PK was renamed from original_old_pk_name_for_this_new_pk
                 self.main_window.update_fk_references_to_pk(name_to_apply, original_old_pk_name_for_this_new_pk, new_pk_name)
         
-        self.table_data_object.columns = copy.deepcopy(columns_to_apply_list) 
-
+        # Remove relationships that are no longer valid due to FK changes *within this table*
+        # The modified remove_relationships_for_table will only remove relationships if FKs in
+        # columns_state_before_this_apply are no longer valid in columns_to_apply_list.
+        # If only colors changed, columns_state_before_this_apply will be structurally identical
+        # to columns_to_apply_list, and no relationships will be removed by this call.
         self.main_window.remove_relationships_for_table(name_to_apply, columns_state_before_this_apply)
 
+        # Apply the new column structure to the table data object
+        self.table_data_object.columns = copy.deepcopy(columns_to_apply_list) 
+
+        # Recreate/update relationships based on current FKs in the table
         for col in self.table_data_object.columns:
             if col.is_fk and col.references_table and col.references_column:
                 target_table_obj = self.main_window.tables_data.get(col.references_table)
                 if target_table_obj:
                     target_pk_col_obj = target_table_obj.get_column_by_name(col.references_column)
                     if target_pk_col_obj and target_pk_col_obj.is_pk: 
-                        # Pass the vertical_segment_x_override from the existing relationship if it's being updated,
-                        # or None if it's a brand new one.
-                        # This requires finding the existing relationship data if any.
+                        # Try to find if this relationship (or a very similar one) existed before
+                        # to preserve its vertical_segment_x_override.
+                        # Search in main_window.relationships_data as it reflects the state *after*
+                        # potential removals by remove_relationships_for_table.
                         existing_rel_data = next((r for r in self.main_window.relationships_data if
                                                   r.table1_name == self.table_data_object.name and r.fk_column_name == col.name and
                                                   r.table2_name == target_table_obj.name and r.pk_column_name == col.references_column), None)
                         
                         override_x = existing_rel_data.vertical_segment_x_override if existing_rel_data else None
 
+                        # create_relationship will update the existing one if found, or create a new one.
+                        # It handles preserving the vertical_segment_x_override if 'override_x' is passed.
                         self.main_window.create_relationship(
                             self.table_data_object, target_table_obj, 
                             col.name, col.references_column,           
                             col.fk_relationship_type,                  
-                            vertical_segment_x_override=override_x, # Pass existing or None
+                            vertical_segment_x_override=override_x, 
                             from_undo_redo=True                        
                         )
-                    else: 
+                    else: # Target PK column not found or not PK, invalidate this FK
                         col.is_fk = False; col.references_table = None; col.references_column = None
-                else: 
+                else: # Target table not found, invalidate this FK
                     col.is_fk = False; col.references_table = None; col.references_column = None
         
-
+        # Update the table's graphical representation
         if self.table_data_object.graphic_item:
             self.table_data_object.graphic_item.prepareGeometryChange()
-            self.table_data_object.graphic_item._calculate_height() 
-            self.table_data_object.graphic_item.update() 
+            self.table_data_object.graphic_item._calculate_height() # Recalculate height based on new columns
+            self.table_data_object.graphic_item.update() # Repaint
 
+        # Update all relationship graphics (paths might change due to table resize/column changes)
         self.main_window.update_all_relationships_graphics() 
         self.main_window.update_window_title()
         self.main_window.populate_diagram_explorer()
         return True
-
-
-    def redo(self):
-        self._apply_properties(self.new_name, self.new_body_color_hex, self.new_header_color_hex, self.new_columns_data)
-
-    def undo(self):
-        self._apply_properties(self.old_name, self.old_body_color_hex, self.old_header_color_hex, self.old_columns_data)
 
 
 # Removed AddOrthogonalBendCommand, MoveOrthogonalBendCommand, DeleteOrthogonalBendCommand, MoveCentralVerticalSegmentCommand
@@ -398,6 +417,60 @@ class CreateRelationshipCommand(QUndoCommand):
         self.main_window.populate_diagram_explorer()
         self.main_window.update_window_title()
         self.created_relationship_data_copy = None 
+
+
+class EditDefaultColorsCommand(QUndoCommand):
+    def __init__(self, main_window, old_body_color, old_header_color, new_body_color, new_header_color, description="Edit Default Table Colors"):
+        super().__init__(description)
+        self.main_window = main_window
+        self.old_body_color = QColor(old_body_color) if old_body_color else None
+        self.old_header_color = QColor(old_header_color) if old_header_color else None
+        self.new_body_color = QColor(new_body_color) if new_body_color else None
+        self.new_header_color = QColor(new_header_color) if new_header_color else None
+
+    def _apply_colors(self, body_color, header_color):
+        self.main_window.user_default_table_body_color = body_color
+        self.main_window.user_default_table_header_color = header_color
+        
+        self.main_window.update_theme_settings()
+        self.main_window.set_theme(self.main_window.current_theme, force_update_tables=True)
+        self.main_window.save_app_settings() # Save to config
+        self.main_window.update_window_title()
+
+    def redo(self):
+        self._apply_colors(self.new_body_color, self.new_header_color)
+
+    def undo(self):
+        self._apply_colors(self.old_body_color, self.old_header_color)
+
+class EditNotesCommand(QUndoCommand):
+    def __init__(self, main_window, old_notes_text, new_notes_text, description="Edit Notes"):
+        super().__init__(description)
+        self.main_window = main_window
+        self.old_notes = old_notes_text
+        self.new_notes = new_notes_text
+        self._is_initial_apply = True # Flag for the first redo() call after push
+
+    def _apply_notes(self, notes_to_apply, update_ui_text_edit):
+        self.main_window.diagram_notes = notes_to_apply
+        if update_ui_text_edit: # Only update editor if not the initial push's redo
+            if hasattr(self.main_window, 'notes_text_edit') and self.main_window.notes_text_edit:
+                # Block signals to prevent on_notes_changed from firing during programmatic update
+                self.main_window.notes_text_edit.blockSignals(True)
+                self.main_window.notes_text_edit.setPlainText(notes_to_apply)
+                self.main_window.notes_text_edit.blockSignals(False)
+        self.main_window.update_window_title()
+
+    def redo(self):
+        # If it's the initial apply (due to push), only update the model if needed, don't touch UI.
+        # For subsequent redos (user action), update both model and UI.
+        update_ui = not self._is_initial_apply
+        self._apply_notes(self.new_notes, update_ui_text_edit=update_ui)
+        self._is_initial_apply = False # Clear flag after first application
+
+    def undo(self):
+        self._apply_notes(self.old_notes, update_ui_text_edit=True) # Undo always updates UI
+        self._is_initial_apply = False # If we undo, then redo, it's no longer initial
 
 
 class DeleteRelationshipCommand(QUndoCommand):

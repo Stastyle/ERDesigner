@@ -28,6 +28,9 @@ class ERDGraphicsScene(QGraphicsScene):
         self.shortcut_start_table_item = None
         self.shortcut_start_column_obj = None
 
+    def update_grid_pen_color(self): # Helper to update grid pen if theme changes
+        self.shortcut_start_column_obj = None
+
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
@@ -95,12 +98,14 @@ class ERDGraphicsScene(QGraphicsScene):
             if self.main_window:
                 QApplication.restoreOverrideCursor()
                 if self.main_window.view: self.main_window.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            # print("Shortcut drawing mode cancelled.") # Debug
             action_cancelled = True
 
         return action_cancelled
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        if self.main_window and self.main_window.drawing_relationship_mode:
+        # 1. Handle main button-initiated drawing mode
+        if self.main_window and self.main_window.drawing_relationship_mode: # This mode uses self.start_item_for_line
             target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
             if event.button() == Qt.MouseButton.LeftButton:
                 if not self.start_item_for_line: 
@@ -129,55 +134,83 @@ class ERDGraphicsScene(QGraphicsScene):
                 self.main_window.reset_drawing_mode() 
                 event.accept(); return 
 
-
-        if event.button() == Qt.MouseButton.RightButton:
-            item_at_pos = self.itemAt(event.scenePos(), self.views()[0].transform() if self.views() else QTransform())
-            if item_at_pos:
-                super().mousePressEvent(event) 
-                if event.isAccepted():
-                    return 
-            
-            if self.drawing_relationship_shortcut_active: 
+        # 2. Handle completion/cancellation of the new right-click shortcut mode
+        if self.drawing_relationship_shortcut_active: # This mode uses self.shortcut_start_table_item
+            if event.button() == Qt.MouseButton.LeftButton: # Finalize with Left Click
+                target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
+                if target_table_item and target_column_obj and \
+                   self.shortcut_start_table_item and target_table_item != self.shortcut_start_table_item:
+                    # Attempt to finalize
+                    if self.main_window:
+                        self.main_window.finalize_relationship_drawing(
+                            self.shortcut_start_table_item.table_data, self.shortcut_start_column_obj,
+                            target_table_item.table_data, target_column_obj
+                        )
+                # Always cancel the shortcut mode after a left-click attempt (finalize or not)
                 self.cancel_active_drawing_modes()
-                event.accept(); return
+                event.accept()
+                return
+            elif event.button() == Qt.MouseButton.RightButton: # Cancel with Right Click
+                self.cancel_active_drawing_modes()
+                event.accept()
+                return
+            # Other mouse buttons during shortcut mode could also cancel or be ignored.
+            # For example, if user presses middle mouse button, it will fall through and likely do nothing or default scene behavior.
+
+        # 3. Handle initiation of the new right-click shortcut mode
+        #    (Only if not in button mode and shortcut not already active)
+        if event.button() == Qt.MouseButton.RightButton and \
+           not (self.main_window and self.main_window.drawing_relationship_mode) and \
+           not self.drawing_relationship_shortcut_active:
             
+            item_at_pos = self.itemAt(event.scenePos(), self.views()[0].transform() if self.views() else QTransform())
+            # If right-click is on an existing item that handles its own context menu, let it.
+            if item_at_pos and not isinstance(item_at_pos, TableGraphicItem): # e.g. Relationship item
+                super().mousePressEvent(event)
+                if event.isAccepted():
+                    return
+
             target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
             if target_table_item and target_column_obj:
-                if not target_column_obj.is_fk: 
-                    if self.main_window and self.main_window.drawing_relationship_mode: self.main_window.reset_drawing_mode()
-
+                # Eligible to START: Column is PK, OR (Column is not PK AND not FK)
+                if target_column_obj.is_pk or \
+                   (not target_column_obj.is_pk and not target_column_obj.is_fk):
+                    
                     self.drawing_relationship_shortcut_active = True
                     self.shortcut_start_table_item = target_table_item
                     self.shortcut_start_column_obj = target_column_obj
+                    
                     self.line_in_progress = QGraphicsPathItem()
-                    self.line_in_progress.setPen(QPen(QColor(0,0,255,150), 2, Qt.PenStyle.DashDotLine))
-                    self.line_in_progress.setZValue(10)
+                    self.line_in_progress.setPen(QPen(QColor(0, 0, 255, 180), 2, Qt.PenStyle.DashDotLine)) # Blue, dashed
+                    self.line_in_progress.setZValue(10) 
                     self.addItem(self.line_in_progress)
+                    
                     start_pos = self.shortcut_start_table_item.get_attachment_point(None, from_column_name=self.shortcut_start_column_obj.name)
-                    path = QPainterPath(start_pos); path.lineTo(event.scenePos()); self.line_in_progress.setPath(path)
+                    path = QPainterPath(start_pos)
+                    path.lineTo(event.scenePos()) 
+                    self.line_in_progress.setPath(path)
+                    
                     if self.main_window:
                         QApplication.setOverrideCursor(Qt.CursorShape.CrossCursor)
                         if self.main_window.view: self.main_window.view.setDragMode(QGraphicsView.DragMode.NoDrag)
-                    event.accept(); return
-            
+                    # print(f"Shortcut drawing initiated from: {target_table_item.table_data.name}.{target_column_obj.name}") # Debug
+                    event.accept()
+                    return
+                # else: # Clicked on an existing FK (but not PK) or other non-eligible column
+                    # print(f"Right-click on non-eligible column for shortcut: {target_column_obj.name} (is_fk={target_column_obj.is_fk})") # Debug
+                    # Let it fall through for potential context menu on the TableGraphicItem itself
+                    pass 
+            # If not initiated (e.g. click on canvas, or on table but not specific eligible column),
+            # let event propagate for general scene context menu or TableGraphicItem's context menu.
 
-        if event.button() == Qt.MouseButton.LeftButton and self.drawing_relationship_shortcut_active:
-            target_table_item, target_column_obj = self.get_item_and_column_at(event.scenePos())
-            if target_table_item and target_column_obj and self.shortcut_start_table_item and target_table_item != self.shortcut_start_table_item:
-                if self.main_window:
-                    self.main_window.finalize_relationship_drawing(
-                        self.shortcut_start_table_item.table_data, self.shortcut_start_column_obj,
-                        target_table_item.table_data, target_column_obj
-                    )
-            self.cancel_active_drawing_modes() 
-            event.accept(); return
-
+        # 4. Fallback to default behavior if not handled by drawing modes or shortcut initiation
         if not event.isAccepted():
             super().mousePressEvent(event)
 
-
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-        active_start_item = None; active_start_column = None
+        active_start_item = None
+        active_start_column = None
+
         if self.main_window and self.main_window.drawing_relationship_mode and self.start_item_for_line:
             active_start_item = self.start_item_for_line; active_start_column = self.start_column_for_line
         elif self.drawing_relationship_shortcut_active and self.shortcut_start_table_item:
@@ -185,7 +218,9 @@ class ERDGraphicsScene(QGraphicsScene):
 
         if self.line_in_progress and active_start_item and active_start_column:
             start_pos = active_start_item.get_attachment_point(None, from_column_name=active_start_column.name)
-            path = QPainterPath(start_pos); path.lineTo(event.scenePos()); self.line_in_progress.setPath(path)
+            path = QPainterPath(start_pos)
+            path.lineTo(event.scenePos())
+            self.line_in_progress.setPath(path)
             event.accept(); return
 
         super().mouseMoveEvent(event)
@@ -203,8 +238,7 @@ class ERDGraphicsScene(QGraphicsScene):
         return round(value / grid_size) * grid_size
 
     def contextMenuEvent(self, event: QGraphicsSceneMouseEvent):
-        if (self.main_window and self.main_window.drawing_relationship_mode) or \
-           self.drawing_relationship_shortcut_active:
+        if (self.main_window and self.main_window.drawing_relationship_mode) or self.drawing_relationship_shortcut_active:
             event.accept()
             return
 
@@ -224,14 +258,19 @@ class ERDGraphicsScene(QGraphicsScene):
                     }}
                 """)
 
-            add_table_action = QAction("הוסף טבלה", menu) 
+            add_table_action = QAction("Add Table", menu)
             add_table_action.triggered.connect(lambda: self.main_window.handle_add_table_button(pos=event.scenePos()))
             menu.addAction(add_table_action)
 
 
-            add_relationship_action = QAction("הוסף קשר (מכפתור)", menu) 
+            add_relationship_action = QAction("Add Relationship (from button)", menu)
             add_relationship_action.triggered.connect(lambda: self.main_window.toggle_relationship_mode_action(True))
             menu.addAction(add_relationship_action)
+
+            if self.main_window and self.main_window.copied_table_data:
+                paste_table_action = QAction("Paste Table Here", menu)
+                paste_table_action.triggered.connect(lambda: self.main_window.paste_copied_table(pos=event.scenePos()))
+                menu.addAction(paste_table_action)
 
 
             menu.exec(event.screenPos())

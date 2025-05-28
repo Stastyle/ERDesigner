@@ -1,0 +1,29 @@
+﻿Table Name,Column Name,Data Type,Is Primary Key,Is Foreign Key,References Table,References Column,FK Relationship Type
+Chapter,Name,TEXT,No,No,,,
+Chapter,ID,TEXT,Yes,No,,,
+Chapter,structure name,TEXT,No,Yes,Structure,ID,N:1
+Chapter,item name,TEXT,No,Yes,Item,ID,N:1
+Item,Name,TEXT,No,No,,,
+Item,ID,TEXT,Yes,No,,,
+Item,StructureLookup,TEXT,No,Yes,Structure,ID,N:1
+Structure,Name,TEXT,No,No,,,
+Structure,ID,TEXT,Yes,No,,,
+Structure,type,TEXT,No,No,,,
+Structure,notes,TEXT,No,Yes,Chapter,ID,N:1
+
+TABLE_POSITION,Table Name,X,Y,Width,Body Color HEX,Header Color HEX
+TABLE_POSITION,Chapter,1440.0,1140.0,300,#f3f4fa,#c8c8e6
+TABLE_POSITION,Item,1880.0,1380.0,240,#f3f4fa,#00ffff
+TABLE_POSITION,Structure,1460.0,1520.0,240,#f1f8fa,#c8c8e6
+CANVAS_SIZE_DEFINITION,Width,Height
+CANVAS_SIZE_DEFINITION,5000,4000
+
+RELATIONSHIP_DEF,From Table (FK Source),FK Column,To Table (PK Source),PK Column,Relationship Type,VerticalSegmentX
+RELATIONSHIP_DEF,Chapter,item name,Item,ID,N:1,
+RELATIONSHIP_DEF,Chapter,structure name,Structure,ID,N:1,1380.0
+RELATIONSHIP_DEF,Item,StructureLookup,Structure,ID,N:1,
+RELATIONSHIP_DEF,Structure,notes,Chapter,ID,N:1,1330.0
+
+DIAGRAM_NOTES_DEFINITION,notes_content_follows
+"Test Notes.
+123"

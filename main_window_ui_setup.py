@@ -1,12 +1,12 @@
 # main_window_ui_setup.py
 # Handles creation of UI elements like menus, diagram explorer, and floating button.
 
-from PyQt6.QtWidgets import (
+from PyQt6.QtWidgets import ( # Added QTextEdit
     QApplication, QDockWidget, QTreeWidget, QPushButton, QMenu, QStyle,
     QHeaderView 
 )
-from PyQt6.QtCore import Qt, QSize, QPoint, QPointF
-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QPixmap, QPainter, QPen, QColor, QActionGroup
+from PyQt6.QtCore import Qt, QSize, QPoint, QPointF, QLocale
+from PyQt6.QtGui import QAction, QIcon, QKeySequence, QPixmap, QPainter, QPen, QColor, QActionGroup, QTextOption, QTextFrameFormat, QFont
 
 from utils import get_standard_icon 
 import constants 
@@ -32,10 +32,20 @@ def create_menus(window):
     actionSaveAs.triggered.connect(window.save_file_as)
     fileMenu.addAction(actionSaveAs)
 
-    actionImportCSV = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowDown, "Import"), "&Import CSV", window)
-    actionImportCSV.setShortcut(QKeySequence.StandardKey.Open) 
-    actionImportCSV.triggered.connect(window.handle_import_csv_button)
-    fileMenu.addAction(actionImportCSV)
+    actionImportERD = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowDown, "Import"), "&Import ERD File", window)
+    actionImportERD.setShortcut(QKeySequence.StandardKey.Open)
+    actionImportERD.triggered.connect(window.handle_import_erd_button)
+    fileMenu.addAction(actionImportERD)
+
+    actionImportSQL = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_ArrowDown, "Import SQL"), "Import S&QL...", window)
+    # actionImportSQL.setShortcut(QKeySequence("Ctrl+Shift+O")) # Example shortcut
+    actionImportSQL.triggered.connect(window.handle_import_sql_button)
+    fileMenu.addAction(actionImportSQL)
+
+    fileMenu.addSeparator()
+    actionExportSQL = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DialogSaveButton, "SQL"), "Export to S&QL...", window)
+    actionExportSQL.triggered.connect(window.export_to_sql_action)
+    fileMenu.addAction(actionExportSQL)
 
     fileMenu.addSeparator()
     actionExit = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_DialogCloseButton, "Exit"), "E&xit", window)
@@ -59,7 +69,21 @@ def create_menus(window):
     window.delete_action.setShortcut(QKeySequence.StandardKey.Delete)
     window.delete_action.triggered.connect(window.delete_selected_items)
     editMenu.addAction(window.delete_action)
-    
+
+    # Setup Copy Action
+    window.actionCopyTable = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_CommandLink, "Copy"), "&Copy Table", window)
+    window.actionCopyTable.setShortcut(QKeySequence.StandardKey.Copy)
+    window.actionCopyTable.triggered.connect(window.handle_copy_shortcut) # Connect to global copy handler
+    window.addAction(window.actionCopyTable) # Add action to window for broader shortcut scope
+    editMenu.addAction(window.actionCopyTable)
+
+    # Setup Paste Action
+    window.actionPasteTable = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_CommandLink, "Paste"), "&Paste Table", window)
+    window.actionPasteTable.setShortcut(QKeySequence.StandardKey.Paste)
+    window.actionPasteTable.triggered.connect(window.paste_copied_table)
+    window.addAction(window.actionPasteTable) # Add action to window for broader shortcut scope
+    editMenu.addAction(window.actionPasteTable)
+
     editMenu.addSeparator()
     window.actionAddTable = QAction(get_standard_icon(QApplication.style().StandardPixmap.SP_FileDialogNewFolder, "Add Tbl"), "Add &Table", window)
     window.actionAddTable.triggered.connect(lambda: window.handle_add_table_button()) 
@@ -75,6 +99,30 @@ def create_menus(window):
     window.toggleExplorerAction = QAction("Toggle Diagram Explorer", window, checkable=True)
     window.toggleExplorerAction.triggered.connect(window.toggle_diagram_explorer)
     viewMenu.addAction(window.toggleExplorerAction)
+
+    window.toggleSqlPreviewAction = QAction("Toggle SQL Preview", window, checkable=True)
+    window.toggleSqlPreviewAction.triggered.connect(window.toggle_sql_preview)
+    viewMenu.addAction(window.toggleSqlPreviewAction)
+
+    window.toggleNotesAction = QAction("Toggle Notes", window, checkable=True)
+    window.toggleNotesAction.triggered.connect(window.toggle_notes_view)
+    viewMenu.addAction(window.toggleNotesAction)
+
+    viewMenu.addSeparator()
+    cardinalityMenu = viewMenu.addMenu("Cardinality Display")
+    
+    window.actionShowCardinalityText = QAction("Show Text", window, checkable=True)
+    window.actionShowCardinalityText.setChecked(constants.show_cardinality_text_globally) # Initial state
+    window.actionShowCardinalityText.triggered.connect(window.toggle_cardinality_text_display)
+    cardinalityMenu.addAction(window.actionShowCardinalityText)
+
+    window.actionShowCardinalitySymbols = QAction("Show Symbols", window, checkable=True)
+    window.actionShowCardinalitySymbols.setChecked(constants.show_cardinality_symbols_globally) # Initial state
+    window.actionShowCardinalitySymbols.triggered.connect(window.toggle_cardinality_symbols_display)
+    cardinalityMenu.addAction(window.actionShowCardinalitySymbols)
+
+    # Initial check state will be set in main_window after loading settings
+
     
     viewMenu.addSeparator()
     themeMenu = viewMenu.addMenu("&Theme")
@@ -125,6 +173,51 @@ def create_diagram_explorer_widget(window):
     window.diagram_explorer_dock.setWidget(window.diagram_explorer_tree)
     window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, window.diagram_explorer_dock)
     window.diagram_explorer_dock.visibilityChanged.connect(lambda visible: update_floating_button_position_widget(window))
+    window.diagram_explorer_dock.visibilityChanged.connect(
+        lambda visible: window.toggleExplorerAction.setChecked(visible) if hasattr(window, 'toggleExplorerAction') else None
+    )
+
+
+def create_sql_preview_widget(window):
+    """Creates the SQL preview dock widget and its text edit area."""
+    from PyQt6.QtWidgets import QTextEdit # Local import for clarity
+    window.sql_preview_dock = QDockWidget("SQL Preview", window)
+    window.sql_preview_dock.setObjectName("SqlPreviewDock")
+    window.sql_preview_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea)
+
+    window.sql_preview_text_edit = QTextEdit()
+    window.sql_preview_text_edit.setReadOnly(True)
+    window.sql_preview_text_edit.setFontFamily("Consolas, 'Courier New', monospace") # Monospaced font
+
+    window.sql_preview_dock.setWidget(window.sql_preview_text_edit)
+    window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, window.sql_preview_dock)
+    window.sql_preview_dock.visibilityChanged.connect(
+        lambda visible: window.toggleSqlPreviewAction.setChecked(visible) if hasattr(window, 'toggleSqlPreviewAction') else None
+    )
+
+def create_notes_widget(window):
+    """Creates the Notes dock widget and its text edit area."""
+    from PyQt6.QtWidgets import QTextEdit # Local import for clarity
+    window.notes_dock = QDockWidget("Notes", window)
+    window.notes_dock.setObjectName("NotesDock")
+    window.notes_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea)
+
+    window.notes_text_edit = QTextEdit()
+    window.notes_text_edit.setPlaceholderText("Enter diagram notes here...")
+
+    # Removing explicit LTR forcing to observe default behavior
+    # window.notes_text_edit.setLocale(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+    # window.notes_text_edit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+    # window.notes_text_edit.setAlignment(Qt.AlignmentFlag.AlignLeft)
+    # Connect textChanged signal to mark diagram as dirty or save notes
+    window.notes_text_edit.textChanged.connect(window.on_notes_changed)
+
+    window.notes_dock.setWidget(window.notes_text_edit)
+    window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, window.notes_dock)
+    window.notes_dock.visibilityChanged.connect(
+        lambda visible: window.toggleNotesAction.setChecked(visible) if hasattr(window, 'toggleNotesAction') else None
+    )
+
 
 
 def create_main_floating_action_button_widget(window):

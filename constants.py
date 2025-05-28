@@ -25,7 +25,7 @@ MIN_TABLE_WIDTH = 120
 DEFAULT_CANVAS_WIDTH = 4000
 DEFAULT_CANVAS_HEIGHT = 3000
 CSV_CANVAS_SIZE_MARKER = "CANVAS_SIZE_DEFINITION" # Marker for CSV
-
+CSV_NOTES_MARKER = "DIAGRAM_NOTES_DEFINITION" # Marker for notes in ERD file
 # --- New Constants for Editable Data Types ---
 DEFAULT_COLUMN_DATA_TYPES = [
     "TEXT", "INTEGER", "REAL", "BLOB", "VARCHAR(255)", "BOOLEAN",
@@ -33,6 +33,39 @@ DEFAULT_COLUMN_DATA_TYPES = [
     "CHAR", "VARCHAR", "INT", "SMALLINT", "BIGINT", "DECIMAL",
     "FLOAT", "DOUBLE PRECISION", "TIME", "JSON"
 ]
+
+# --- Config Keys ---
+CONFIG_KEY_SQL_PREVIEW_VISIBLE = "sql_preview_visible"
+CONFIG_KEY_CUSTOM_COLORS = "custom_colors_hex_list"
+CONFIG_KEY_NOTES_VISIBLE = "notes_visible" # For config.ini
+
+# --- Color Definitions ---
+BASIC_COLORS_HEX = [ # Approx 10-12 basic colors
+    "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#00FFFF", "#FF00FF", # Red, Green, Blue, Yellow, Cyan, Magenta
+    "#000000", "#FFFFFF", "#808080", "#FFA500", "#A0A0A0", "#404040"  # Black, White, Gray, Orange, Light Gray, Dark Gray
+]
+MAX_SAVED_CUSTOM_COLORS = 24 # Max number of custom colors to save in config
+
+user_saved_custom_colors = [] # List of QColor objects, loaded from config
+
+# --- Crow's Foot Symbol Constants ---
+CROWS_FOOT_LINE_LENGTH = 12  # Slightly longer lines for the foot
+CROWS_FOOT_ANGLE_DEG = 150  # Slightly wider angle for the foot
+# ONE_SYMBOL_PERPENDICULAR_LENGTH and ONE_SYMBOL_SPACING removed as _draw_one_symbol is empty
+SYMBOL_STROKE_WIDTH = 1.5
+SYMBOL_OFFSET_FROM_TABLE_EDGE = -10 # Distance from table edge to the symbol's vertex
+
+# --- Cardinality Display Settings ---
+DEFAULT_SHOW_CARDINALITY_TEXT = True
+DEFAULT_SHOW_CARDINALITY_SYMBOLS = True
+CONFIG_KEY_SHOW_CARDINALITY_TEXT = "show_cardinality_text"
+CONFIG_KEY_SHOW_CARDINALITY_SYMBOLS = "show_cardinality_symbols"
+# Obsolete cardinality display mode constants removed
+# CARDINALITY_DISPLAY_TEXT_ONLY = "text_only"
+# CARDINALITY_DISPLAY_SYMBOLS_ONLY = "symbols_only"
+# CARDINALITY_DISPLAY_BOTH = "both"
+# DEFAULT_CARDINALITY_DISPLAY_MODE = CARDINALITY_DISPLAY_BOTH
+# current_cardinality_display_mode = DEFAULT_CARDINALITY_DISPLAY_MODE
 
 # --- Globally Accessible Current Settings (to be updated from config/UI) ---
 current_theme_settings = {} 
@@ -42,8 +75,10 @@ current_canvas_dimensions = {
     "height": DEFAULT_CANVAS_HEIGHT
 }
 
-editable_column_data_types = DEFAULT_COLUMN_DATA_TYPES[:] 
+show_cardinality_text_globally = DEFAULT_SHOW_CARDINALITY_TEXT
+show_cardinality_symbols_globally = DEFAULT_SHOW_CARDINALITY_SYMBOLS
 
+editable_column_data_types = DEFAULT_COLUMN_DATA_TYPES[:] 
 
 # --- Theme Colors ---
 light_theme_colors = {

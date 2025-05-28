@@ -15,9 +15,11 @@ from PyQt6.QtGui import (
     QFontMetrics, QPainterPathStroker, QAction, QFontDatabase
 )
 
+import constants # Import the constants module
 from constants import (
-    TABLE_HEADER_HEIGHT, COLUMN_HEIGHT, PADDING, GRID_SIZE,
-    RELATIONSHIP_HANDLE_SIZE, MIN_HORIZONTAL_SEGMENT, CARDINALITY_OFFSET,
+    TABLE_HEADER_HEIGHT, COLUMN_HEIGHT, PADDING, GRID_SIZE, show_cardinality_text_globally, show_cardinality_symbols_globally,
+    RELATIONSHIP_HANDLE_SIZE, MIN_HORIZONTAL_SEGMENT, SYMBOL_OFFSET_FROM_TABLE_EDGE, 
+    CROWS_FOOT_LINE_LENGTH, CROWS_FOOT_ANGLE_DEG, SYMBOL_STROKE_WIDTH, CARDINALITY_OFFSET,
     CARDINALITY_TEXT_MARGIN, TABLE_RESIZE_HANDLE_WIDTH, MIN_TABLE_WIDTH, current_theme_settings
 )
 from utils import snap_to_grid, get_contrasting_text_color
@@ -305,7 +307,21 @@ class TableGraphicItem(QGraphicsItem):
                              self.table_data.body_color, self.table_data.header_color)
 
         if dialog.exec():
-            new_name_str, new_columns_data_list, new_body_color_hex_str, new_header_color_hex_str = dialog.get_table_data()
+            # קבלת כל הנתונים מהדיאלוג, כולל צבעים מותאמים אישית חדשים
+            new_name_str, new_columns_data_list, new_body_color_hex_str, new_header_color_hex_str, newly_picked_custom_colors_set = dialog.get_table_data()
+
+            # טיפול בצבעים מותאמים אישית חדשים שנבחרו
+            if newly_picked_custom_colors_set:
+                made_changes_to_global_custom_list = False
+                current_saved_hex = {c.name() for c in constants.user_saved_custom_colors}
+                basic_hex = {QColor(bc).name() for bc in constants.BASIC_COLORS_HEX}
+                for color_hex in newly_picked_custom_colors_set:
+                    if color_hex not in current_saved_hex and color_hex not in basic_hex:
+                        constants.user_saved_custom_colors.append(QColor(color_hex))
+                        made_changes_to_global_custom_list = True
+                if made_changes_to_global_custom_list:
+                    constants.user_saved_custom_colors = constants.user_saved_custom_colors[-constants.MAX_SAVED_CUSTOM_COLORS:]
+                    main_window.save_app_settings()
 
             if not new_name_str:
                 QMessageBox.warning(main_window, "Warning", "Table name cannot be empty.") 
@@ -341,6 +357,55 @@ class TableGraphicItem(QGraphicsItem):
 
         event.accept()
 
+    def contextMenuEvent(self, event: QGraphicsSceneMouseEvent):
+        main_window = self.scene().main_window if self.scene() else None
+        if not main_window:
+            super().contextMenuEvent(event)
+            return
+
+        menu = QMenu()
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {main_window.current_theme_settings['toolbar_bg'].name()};
+                color: {main_window.current_theme_settings['text_color'].name()};
+                border: 1px solid {main_window.current_theme_settings['toolbar_border'].name()};
+            }}
+            QMenu::item:selected {{
+                background-color: {main_window.current_theme_settings['button_hover_bg'].name()};
+            }}
+        """)
+
+        edit_action = QAction("Edit Table...", menu)
+        edit_action.triggered.connect(lambda: self.mouseDoubleClickEvent(event)) # Reuse double-click logic
+        menu.addAction(edit_action)
+
+        copy_action = QAction("Copy Table", menu)
+        copy_action.triggered.connect(self.request_copy_table)
+        menu.addAction(copy_action)
+
+        delete_action = QAction("Delete Table", menu)
+        delete_action.triggered.connect(self.request_delete_table)
+        menu.addAction(delete_action)
+
+        menu.exec(event.screenPos())
+        event.accept()
+
+    def request_delete_table(self):
+        main_window = self.scene().main_window if self.scene() else None
+        if not main_window: return
+
+        from commands import DeleteTableCommand # Local import
+        reply = QMessageBox.question(main_window, "Confirm Deletion",
+                                     f"Are you sure you want to delete table '{self.table_data.name}' and all its relationships?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            command = DeleteTableCommand(main_window, self.table_data)
+            main_window.undo_stack.push(command)
+
+    def request_copy_table(self):
+        main_window = self.scene().main_window if self.scene() else None
+        if main_window:
+            main_window.copy_selected_table(self.table_data)
 
 class OrthogonalRelationshipPathItem(QGraphicsPathItem):
     def __init__(self, relationship_data, parent=None):
@@ -507,52 +572,125 @@ class OrthogonalRelationshipPathItem(QGraphicsPathItem):
                 card1_symbol = parts[0].strip().upper()
                 card2_symbol = parts[1].strip().upper()
 
-            painter.setPen(QColor(current_theme_settings.get("cardinality_text_color", QColor(Qt.GlobalColor.black))))
-            font = painter.font(); font.setBold(True); font.setPointSize(8)
-            painter.setFont(font)
-            font_metrics = QFontMetrics(font)
+            # Get current display preferences
+            should_show_text = show_cardinality_text_globally
+            should_show_symbols = show_cardinality_symbols_globally
+            if self.scene() and hasattr(self.scene(), 'main_window') and self.scene().main_window:
+                should_show_text = self.scene().main_window.show_cardinality_text
+                should_show_symbols = self.scene().main_window.show_cardinality_symbols
 
-            # --- Cardinality at start_attachment_point (FK side) ---
-            text_rect1 = font_metrics.boundingRect(card1_symbol)
-            s_point_item = self.mapFromScene(s_point_scene) 
-            text_pos1 = QPointF(s_point_item) 
-            text_pos1.setY(s_point_item.y() - text_rect1.height() * 0.7) 
-            
-            # Determine if s_point_scene is on the left or right edge of its table
-            s_point_on_left_edge = False
-            if self.scene() and self.scene().main_window:
-                table1_data = self.scene().main_window.tables_data.get(self.relationship_data.table1_name)
-                if table1_data and table1_data.graphic_item:
-                    table1_rect_scene = table1_data.graphic_item.sceneBoundingRect()
-                    if abs(s_point_scene.x() - table1_rect_scene.left()) < 1.0:
-                        s_point_on_left_edge = True
-            
-            if s_point_on_left_edge: # Attached to left edge of source table
-                text_pos1.setX(s_point_item.x() - CARDINALITY_TEXT_MARGIN - text_rect1.width())
-            else: # Attached to right edge of source table
-                text_pos1.setX(s_point_item.x() + CARDINALITY_TEXT_MARGIN)
-            painter.drawText(text_pos1, card1_symbol)
+            s_point_item = self.mapFromScene(s_point_scene)
+            e_point_item = self.mapFromScene(e_point_scene)
+            if should_show_text:
+                painter.setPen(QColor(current_theme_settings.get("cardinality_text_color", QColor(Qt.GlobalColor.black))))
+                font = painter.font(); font.setBold(True); font.setPointSize(8)
+                painter.setFont(font)
+                font_metrics = QFontMetrics(font)
 
-            # --- Cardinality at end_attachment_point (PK side) ---
-            text_rect2 = font_metrics.boundingRect(card2_symbol)
-            e_point_item = self.mapFromScene(e_point_scene) 
-            text_pos2 = QPointF(e_point_item)
-            text_pos2.setY(e_point_item.y() - text_rect2.height() * 0.7) 
-            
-            e_point_on_left_edge = False
-            if self.scene() and self.scene().main_window:
-                table2_data = self.scene().main_window.tables_data.get(self.relationship_data.table2_name)
-                if table2_data and table2_data.graphic_item:
-                    table2_rect_scene = table2_data.graphic_item.sceneBoundingRect()
-                    if abs(e_point_scene.x() - table2_rect_scene.left()) < 1.0:
-                        e_point_on_left_edge = True
-            
-            if e_point_on_left_edge: # Attached to left edge of target table
-                text_pos2.setX(e_point_item.x() - CARDINALITY_TEXT_MARGIN - text_rect2.width())
-            else: # Attached to right edge of target table
-                text_pos2.setX(e_point_item.x() + CARDINALITY_TEXT_MARGIN)
-            painter.drawText(text_pos2, card2_symbol)
+                # --- Cardinality at start_attachment_point (FK side) ---
+                text_rect1 = font_metrics.boundingRect(card1_symbol)
+                text_pos1 = QPointF(s_point_item) 
+                text_pos1.setY(s_point_item.y() - text_rect1.height() * 0.7) 
+                
+                s_point_on_left_edge = False
+                if self.scene() and self.scene().main_window:
+                    table1_data = self.scene().main_window.tables_data.get(self.relationship_data.table1_name)
+                    if table1_data and table1_data.graphic_item:
+                        table1_rect_scene = table1_data.graphic_item.sceneBoundingRect()
+                        if abs(s_point_scene.x() - table1_rect_scene.left()) < 1.0:
+                            s_point_on_left_edge = True
+                
+                if s_point_on_left_edge: 
+                    text_pos1.setX(s_point_item.x() - CARDINALITY_TEXT_MARGIN - text_rect1.width())
+                else: 
+                    text_pos1.setX(s_point_item.x() + CARDINALITY_TEXT_MARGIN)
+                painter.drawText(text_pos1, card1_symbol)
 
+                # --- Cardinality at end_attachment_point (PK side) ---
+                text_rect2 = font_metrics.boundingRect(card2_symbol)
+                text_pos2 = QPointF(e_point_item)
+                text_pos2.setY(e_point_item.y() - text_rect2.height() * 0.7) 
+                
+                e_point_on_left_edge = False
+                if self.scene() and self.scene().main_window:
+                    table2_data = self.scene().main_window.tables_data.get(self.relationship_data.table2_name)
+                    if table2_data and table2_data.graphic_item:
+                        table2_rect_scene = table2_data.graphic_item.sceneBoundingRect()
+                        if abs(e_point_scene.x() - table2_rect_scene.left()) < 1.0:
+                            e_point_on_left_edge = True
+                
+                if e_point_on_left_edge: 
+                    text_pos2.setX(e_point_item.x() - CARDINALITY_TEXT_MARGIN - text_rect2.width())
+                else: 
+                    text_pos2.setX(e_point_item.x() + CARDINALITY_TEXT_MARGIN)
+                painter.drawText(text_pos2, card2_symbol)
+
+            if should_show_symbols:
+                symbol_pen = QPen(painter.pen().color(), SYMBOL_STROKE_WIDTH) 
+                symbol_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(symbol_pen)
+                
+                path_elements = [self.path().elementAt(i) for i in range(self.path().elementCount())]
+                
+                prev_s_point = self.mapFromScene(QPointF(intermediate_x_scene, s_point_scene.y())) 
+                if self.path().elementCount() >= 2 and path_elements[1].type == QPainterPath.ElementType.LineToElement:
+                     prev_s_point = QPointF(path_elements[1].x, path_elements[1].y)
+                elif self.path().elementCount() == 2: 
+                     prev_s_point = e_point_item
+
+                angle_s_rad = math.atan2(s_point_item.y() - prev_s_point.y(), s_point_item.x() - prev_s_point.x())
+                symbol_vertex_s_x = s_point_item.x() + SYMBOL_OFFSET_FROM_TABLE_EDGE * math.cos(angle_s_rad)
+                symbol_vertex_s_y = s_point_item.y() + SYMBOL_OFFSET_FROM_TABLE_EDGE * math.sin(angle_s_rad)
+                symbol_vertex_s = QPointF(symbol_vertex_s_x, symbol_vertex_s_y)
+
+                if card1_symbol in ["N", "M"]: 
+                    self._draw_many_symbol(painter, symbol_vertex_s, angle_s_rad)
+
+                prev_e_point = self.mapFromScene(QPointF(intermediate_x_scene, e_point_scene.y())) 
+                if self.path().elementCount() >= 3 and path_elements[-2].type == QPainterPath.ElementType.LineToElement:
+                     prev_e_point = QPointF(path_elements[-2].x, path_elements[-2].y)
+                elif self.path().elementCount() == 2: 
+                     prev_e_point = s_point_item
+                     
+                angle_e_rad = math.atan2(e_point_item.y() - prev_e_point.y(), e_point_item.x() - prev_e_point.x())
+                symbol_vertex_e_x = e_point_item.x() + SYMBOL_OFFSET_FROM_TABLE_EDGE * math.cos(angle_e_rad)
+                symbol_vertex_e_y = e_point_item.y() + SYMBOL_OFFSET_FROM_TABLE_EDGE * math.sin(angle_e_rad)
+                symbol_vertex_e = QPointF(symbol_vertex_e_x, symbol_vertex_e_y)
+
+                if card2_symbol in ["N", "M"]: 
+                    self._draw_many_symbol(painter, symbol_vertex_e, angle_e_rad)
+
+    def _draw_one_symbol(self, painter: QPainter, connection_point: QPointF, line_angle_rad: float):
+        """Draws 'one' symbol. Currently, no symbol is drawn for '1'."""
+        # This method can be left empty or removed if no symbol is desired for "1".
+        pass
+
+    def _draw_many_symbol(self, painter: QPainter, connection_point: QPointF, line_angle_rad: float):
+        """Draws 'many' symbol (crow's foot) at connection_point."""
+        painter.save()
+        painter.translate(connection_point)
+        painter.rotate(math.degrees(line_angle_rad)) # Rotate to align with the line
+
+        # Crow's foot lines extend "behind" the connection_point along the rotated x-axis
+        angle1_rad = math.radians(CROWS_FOOT_ANGLE_DEG)
+        angle2_rad = -math.radians(CROWS_FOOT_ANGLE_DEG)
+
+        # Central line (optional, some notations don't have it if other lines are present)
+        # painter.drawLine(QPointF(0, 0), QPointF(-CROWS_FOOT_LINE_LENGTH, 0)) 
+
+        # Outer lines
+        end_x1 = -CROWS_FOOT_LINE_LENGTH * math.cos(angle1_rad)
+        end_y1 = -CROWS_FOOT_LINE_LENGTH * math.sin(angle1_rad)
+        painter.drawLine(QPointF(0, 0), QPointF(end_x1, end_y1))
+
+        end_x2 = -CROWS_FOOT_LINE_LENGTH * math.cos(angle2_rad)
+        end_y2 = -CROWS_FOOT_LINE_LENGTH * math.sin(angle2_rad)
+        painter.drawLine(QPointF(0, 0), QPointF(end_x2, end_y2))
+        
+        # Third line for many (often straight back if not using the optional central line above)
+        painter.drawLine(QPointF(0,0), QPointF(-CROWS_FOOT_LINE_LENGTH, 0))
+
+        painter.restore()
 
     def get_vertical_segment_handle_rect_item_coords(self) -> QRectF | None:
         if self.vertical_segment_handle:

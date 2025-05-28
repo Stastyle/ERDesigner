@@ -9,10 +9,24 @@ def keyPressEvent_handler(window, event):
     """Handles key press events for the main window."""
     if event.key() == Qt.Key.Key_Delete:
         window.delete_selected_items()
+        event.accept()
     elif event.matches(QKeySequence.StandardKey.Undo):
         window.undo_stack.undo()
+        event.accept()
     elif event.matches(QKeySequence.StandardKey.Redo):
         window.undo_stack.redo()
+        event.accept()
+    elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+        # Explicitly handle Ctrl+C
+        if hasattr(window, 'handle_copy_shortcut'):
+            window.handle_copy_shortcut()
+            event.accept()
+    elif event.key() == Qt.Key.Key_V and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+        # Explicitly handle Ctrl+V
+        if hasattr(window, 'paste_copied_table'):
+            # Paste at a default offset, not a specific mouse position for global shortcut
+            window.paste_copied_table() 
+            event.accept()
     elif event.key() == Qt.Key.Key_Escape:
         # Check if any drawing mode is active and cancel it
         action_cancelled = False

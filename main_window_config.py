@@ -26,6 +26,11 @@ def load_app_settings(window):
         constants.editable_column_data_types = constants.DEFAULT_COLUMN_DATA_TYPES[:]
         window.current_theme = "light"
         window.user_default_table_body_color = None 
+        constants.user_saved_custom_colors = [] # Initialize empty for new config
+        window.sql_preview_visible_on_load = True # Default for new config
+        window.notes_visible_on_load = True # Default for notes
+        constants.show_cardinality_text_globally = constants.DEFAULT_SHOW_CARDINALITY_TEXT
+        constants.show_cardinality_symbols_globally = constants.DEFAULT_SHOW_CARDINALITY_SYMBOLS
         window.user_default_table_header_color = None
         save_app_settings(window) 
         return
@@ -91,8 +96,49 @@ def load_app_settings(window):
     except (configparser.NoSectionError, configparser.NoOptionError):
         print("WindowState not found in config, will use default layout.")
         window.loaded_window_state = None
+    
+    # Load custom colors
+    try:
+        custom_colors_str = config.get('UserPreferences', constants.CONFIG_KEY_CUSTOM_COLORS, fallback="")
+        if custom_colors_str:
+            constants.user_saved_custom_colors = [QColor(hex_str) for hex_str in custom_colors_str.split(',') if QColor.isValidColor(hex_str)]
+        else:
+            constants.user_saved_custom_colors = []
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        constants.user_saved_custom_colors = []
+
+    # Load SQL Preview visibility (primarily for initial state if not covered by QMainWindow state)
+    try:
+        # Assuming UIState section might not exist if WindowState doesn't, or use UserPreferences
+        section_to_check_ui = 'UIState' if config.has_section('UIState') else 'UserPreferences'
+        window.sql_preview_visible_on_load = config.getboolean(section_to_check_ui, constants.CONFIG_KEY_SQL_PREVIEW_VISIBLE, fallback=True)
+        window.notes_visible_on_load = config.getboolean(section_to_check_ui, constants.CONFIG_KEY_NOTES_VISIBLE, fallback=True)
+
+    except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+        window.sql_preview_visible_on_load = True # Default if not found or invalid
+        window.notes_visible_on_load = True # Default if not found or invalid
         
-    print(f"Loaded settings: Theme='{window.current_theme}', Canvas=({constants.current_canvas_dimensions['width']}x{constants.current_canvas_dimensions['height']}), Data Types={constants.editable_column_data_types}")
+    # Load Cardinality Display Settings
+    try:
+        display_settings_section = 'DisplaySettings' if config.has_section('DisplaySettings') else 'UserPreferences'
+        constants.show_cardinality_text_globally = config.getboolean(
+            display_settings_section,
+            constants.CONFIG_KEY_SHOW_CARDINALITY_TEXT,
+            fallback=constants.DEFAULT_SHOW_CARDINALITY_TEXT
+        )
+        constants.show_cardinality_symbols_globally = config.getboolean(
+            display_settings_section,
+            constants.CONFIG_KEY_SHOW_CARDINALITY_SYMBOLS,
+            fallback=constants.DEFAULT_SHOW_CARDINALITY_SYMBOLS
+        )
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        constants.show_cardinality_text_globally = constants.DEFAULT_SHOW_CARDINALITY_TEXT
+        constants.show_cardinality_symbols_globally = constants.DEFAULT_SHOW_CARDINALITY_SYMBOLS
+
+    print(f"Loaded settings: Theme='{window.current_theme}', Canvas=({constants.current_canvas_dimensions['width']}x{constants.current_canvas_dimensions['height']}), "
+          f"Data Types={constants.editable_column_data_types}, "
+          f"SQL Preview Visible on Load (config): {window.sql_preview_visible_on_load}, "
+          f"Notes Visible on Load (config): {window.notes_visible_on_load}, Show Cardinality Text: {constants.show_cardinality_text_globally}, Show Cardinality Symbols: {constants.show_cardinality_symbols_globally}")
     # Removed print of Explorer Columns
 
 
@@ -126,6 +172,33 @@ def save_app_settings(window):
     config['WindowState'] = {
         'state': window_state_bytes.toBase64().data().decode('utf-8')
     }
+
+    if not config.has_section('UserPreferences'):
+        config.add_section('UserPreferences')
+
+    # Save custom colors (as comma-separated hex strings)
+    custom_colors_hex = [color.name() for color in constants.user_saved_custom_colors]
+    config.set('UserPreferences', constants.CONFIG_KEY_CUSTOM_COLORS, ",".join(custom_colors_hex))
+    
+    # Save SQL Preview visibility (from the dock's current state)
+    sql_dock_is_visible = False
+    if hasattr(window, 'sql_preview_dock') and window.sql_preview_dock:
+        sql_dock_is_visible = window.sql_preview_dock.isVisible()
+    
+    notes_dock_is_visible = False
+    if hasattr(window, 'notes_dock') and window.notes_dock:
+        notes_dock_is_visible = window.notes_dock.isVisible()
+
+    # Assuming UIState section might not exist if WindowState doesn't, or use UserPreferences
+    section_to_set_ui = 'UIState' if config.has_section('UIState') else 'UserPreferences'
+    config.set(section_to_set_ui, constants.CONFIG_KEY_SQL_PREVIEW_VISIBLE, str(sql_dock_is_visible))
+    config.set(section_to_set_ui, constants.CONFIG_KEY_NOTES_VISIBLE, str(notes_dock_is_visible))
+    
+    # Save Cardinality Display Settings
+    display_settings_section = 'DisplaySettings' if config.has_section('DisplaySettings') else 'UserPreferences'
+    if not config.has_section(display_settings_section): config.add_section(display_settings_section)
+    config.set(display_settings_section, constants.CONFIG_KEY_SHOW_CARDINALITY_TEXT, str(constants.show_cardinality_text_globally))
+    config.set(display_settings_section, constants.CONFIG_KEY_SHOW_CARDINALITY_SYMBOLS, str(constants.show_cardinality_symbols_globally))
 
     try:
         with open(CONFIG_FILE, 'w') as configfile:

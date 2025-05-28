@@ -130,6 +130,50 @@ def set_theme_util(window, theme_name, force_update_tables=False):
                 border-bottom: 1px solid {window.current_theme_settings['toolbar_border'].name()};
             }}
         """)
+    
+    # Style SQL Preview Dock and TextEdit
+    if hasattr(window, 'sql_preview_dock') and window.sql_preview_dock:
+        window.sql_preview_dock.setStyleSheet(f"""
+            QDockWidget {{
+                background-color: {window.current_theme_settings['toolbar_bg'].name()};
+                color: {window.current_theme_settings['text_color'].name()};
+            }}
+            QDockWidget::title {{
+                text-align: left; background: {window.current_theme_settings['toolbar_bg'].name()};
+                padding: 5px; padding-left: 8px;
+                color: {window.current_theme_settings['text_color'].name()};
+                border-bottom: 1px solid {window.current_theme_settings['toolbar_border'].name()};
+            }}""")
+    if hasattr(window, 'sql_preview_text_edit') and window.sql_preview_text_edit:
+        window.sql_preview_text_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {window.current_theme_settings['view_bg'].name()};
+                color: {window.current_theme_settings['text_color'].name()};
+                border: 1px solid {window.current_theme_settings['toolbar_border'].name()};
+                font-family: Consolas, 'Courier New', monospace; 
+            }}""")
+    
+    # Style Notes Dock and TextEdit
+    if hasattr(window, 'notes_dock') and window.notes_dock:
+        window.notes_dock.setStyleSheet(f"""
+            QDockWidget {{
+                background-color: {window.current_theme_settings['toolbar_bg'].name()};
+                color: {window.current_theme_settings['text_color'].name()};
+            }}
+            QDockWidget::title {{
+                text-align: left; background: {window.current_theme_settings['toolbar_bg'].name()};
+                padding: 5px; padding-left: 8px;
+                color: {window.current_theme_settings['text_color'].name()};
+                border-bottom: 1px solid {window.current_theme_settings['toolbar_border'].name()};
+            }}""")
+    if hasattr(window, 'notes_text_edit') and window.notes_text_edit:
+        window.notes_text_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {window.current_theme_settings['view_bg'].name()};
+                color: {window.current_theme_settings['text_color'].name()};
+                border: 1px solid {window.current_theme_settings['toolbar_border'].name()};
+                /* font-family: Consolas, 'Courier New', monospace; */ /* Optional: keep standard font for notes */
+            }}""")
 
     window.save_app_settings() 
     if hasattr(window, '_update_floating_button_position'): 
@@ -181,7 +225,7 @@ def apply_styles_util(window):
             border-radius: 3px;
             padding: 3px;
             min-height: 20px; 
-            background-color: {window.current_theme_settings['view_bg'].name()}; 
+            background-color: {window.current_theme_settings['dialog_input_bg'].name()}; 
             color: {window.current_theme_settings['text_color'].name()};
         }}
         QComboBox QAbstractItemView {{ 
@@ -213,6 +257,12 @@ def apply_styles_util(window):
         }}
         QMenu::item:selected {{
             background-color: {window.current_theme_settings['button_hover_bg'].name()};
+        }}
+        QTextEdit {{
+            background-color: {window.current_theme_settings['view_bg'].name()};
+            color: {window.current_theme_settings['text_color'].name()};
+            border: 1px solid {window.current_theme_settings['toolbar_border'].name()};
+            font-family: Consolas, 'Courier New', monospace;
         }}
         {fab_style}
     """

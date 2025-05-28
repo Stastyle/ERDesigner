@@ -1,18 +1,157 @@
 # dialogs.py
 # This file contains QDialog subclasses for user interactions.
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QLabel, QScrollArea, QWidget,
+from PyQt6.QtWidgets import ( QMenu,
+    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QLabel, QScrollArea, QWidget, QGridLayout, QTabWidget,
     QPushButton, QDialogButtonBox, QCheckBox, QComboBox, QHBoxLayout, QColorDialog,
     QApplication, QSizePolicy, QListWidget, QListWidgetItem, QAbstractItemView,
     QSpinBox, QInputDialog, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFontMetrics, QColor, QIcon, QPixmap, QPainter
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtGui import QFontMetrics, QColor, QIcon, QPixmap, QPainter, QAction
 
 import constants # Import the constants module
 from utils import get_standard_icon, get_contrasting_text_color
 from data_models import Column
+
+class ColorSwatchButton(QPushButton):
+    """A QPushButton that displays a color and handles context menu for deletion."""
+    delete_requested = pyqtSignal(QColor)
+
+    def __init__(self, color_obj, main_window_ref, parent=None): # Added main_window_ref
+        super().__init__(parent)
+        self.color_data = color_obj
+        self.main_window_ref = main_window_ref # Store main window reference
+        self.setFixedSize(20, 20)
+        self.setStyleSheet(f"background-color: {self.color_data.name()}; border: 1px solid gray;")
+        self.setToolTip(self.color_data.name())
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        if self.main_window_ref and hasattr(self.main_window_ref, 'current_theme_settings'):
+            menu.setStyleSheet(f"""
+                QMenu {{
+                    background-color: {self.main_window_ref.current_theme_settings.get('toolbar_bg', QColor(240,240,240)).name()};
+                    color: {self.main_window_ref.current_theme_settings.get('text_color', QColor(0,0,0)).name()};
+                    border: 1px solid {self.main_window_ref.current_theme_settings.get('toolbar_border', QColor(200,200,200)).name()};
+                }}
+                QMenu::item:selected {{
+                    background-color: {self.main_window_ref.current_theme_settings.get('button_hover_bg', QColor(220,220,220)).name()};
+                }}
+            """)
+
+        delete_action = QAction("Delete Custom Color", self)
+        delete_action.triggered.connect(self.request_delete)
+        menu.addAction(delete_action)
+        menu.exec(event.globalPos())
+
+    def request_delete(self):
+        self.delete_requested.emit(self.color_data)
+
+
+class AdvancedColorPickerDialog(QDialog):
+    def __init__(self, initial_color, main_window_ref, parent=None): # Added main_window_ref
+        super().__init__(parent)
+        self.setWindowTitle("Select Color")
+        self.setMinimumWidth(240) # Adjusted for a more compact layout
+        self.selected_color = QColor(initial_color) # Start with the initial color
+        self.is_new_custom_pick = False # Flag to indicate if a new color was picked from QColorDialog
+
+        main_layout = QVBoxLayout(self)
+        self.main_window_ref = main_window_ref # Store main window reference
+        self.tab_widget = QTabWidget()
+
+        # Basic Colors Tab
+        basic_colors_widget = QWidget()
+        basic_layout = QGridLayout(basic_colors_widget)
+        basic_layout.setSpacing(5)
+        basic_colors_per_row = 4 # Aim for a 4x3 grid for 12 basic colors
+        row, col = 0, 0
+        for i, hex_color in enumerate(constants.BASIC_COLORS_HEX):
+            color = QColor(hex_color)
+            btn = QPushButton()
+            btn.setFixedSize(20, 20) # Smaller color swatch buttons
+            btn.setStyleSheet(f"background-color: {color.name()}; border: 1px solid gray;")
+            btn.setToolTip(color.name())
+            btn.clicked.connect(lambda chk, c=color: self.set_selected_color(c, is_new_custom=False))
+            basic_layout.addWidget(btn, row, col)
+            col += 1
+            if col >= basic_colors_per_row:
+                col = 0
+                row += 1
+        self.tab_widget.addTab(basic_colors_widget, "Basic Colors")
+
+        # Custom Colors Tab
+        custom_colors_widget = QWidget()
+        custom_layout = QVBoxLayout(custom_colors_widget)
+        
+        self.custom_colors_grid_widget = QWidget() # For the grid of saved custom colors
+        self.custom_colors_grid_layout = QGridLayout(self.custom_colors_grid_widget)
+        self.custom_colors_grid_layout.setSpacing(5)
+        self.populate_custom_colors_grid()
+        custom_layout.addWidget(self.custom_colors_grid_widget)
+
+        btn_choose_from_palette = QPushButton("Choose from Palette...")
+        btn_choose_from_palette.clicked.connect(self.pick_from_palette)
+        custom_layout.addWidget(btn_choose_from_palette)
+        custom_layout.addStretch()
+        self.tab_widget.addTab(custom_colors_widget, "Custom Colors")
+
+        main_layout.addWidget(self.tab_widget)
+
+        # OK and Cancel buttons
+        self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+        main_layout.addWidget(self.buttonBox)
+
+    def populate_custom_colors_grid(self):
+        # Clear existing buttons
+        for i in reversed(range(self.custom_colors_grid_layout.count())): 
+            widget_to_remove = self.custom_colors_grid_layout.itemAt(i).widget()
+            if widget_to_remove:
+                widget_to_remove.setParent(None)
+                widget_to_remove.deleteLater()
+
+        row, col = 0, 0
+        custom_colors_per_row = 6 # Aim for a 6xN grid for custom colors
+        for color in constants.user_saved_custom_colors:
+            # Always use ColorSwatchButton for the custom colors grid
+            btn = ColorSwatchButton(color, self.main_window_ref, self) # Pass main_window_ref
+            btn.clicked.connect(lambda chk, c=color: self.set_selected_color(c, is_new_custom=False))
+            btn.delete_requested.connect(self.handle_delete_custom_color)
+
+            self.custom_colors_grid_layout.addWidget(btn, row, col)
+            col += 1
+            if col >= custom_colors_per_row:
+                col = 0
+                row += 1
+    def pick_from_palette(self):
+        color = QColorDialog.getColor(self.selected_color, self, "Choose Custom Color")
+        if color.isValid():
+            # Check if this color is already basic or saved custom
+            is_basic = any(QColor(bc_hex).name() == color.name() for bc_hex in constants.BASIC_COLORS_HEX)
+            is_existing_custom = any(saved_c.name() == color.name() for saved_c in constants.user_saved_custom_colors)
+            
+            self.set_selected_color(color, is_new_custom=not (is_basic or is_existing_custom))
+            self.accept() # Accept immediately after picking from palette
+
+    def set_selected_color(self, color, is_new_custom):
+        self.selected_color = color
+        self.is_new_custom_pick = is_new_custom
+        if not is_new_custom: # If picked from basic or existing custom, accept dialog
+            self.accept()
+
+    def get_result(self):
+        return self.selected_color, self.is_new_custom_pick
+
+    def handle_delete_custom_color(self, color_to_delete):
+        if color_to_delete in constants.user_saved_custom_colors:
+            constants.user_saved_custom_colors.remove(color_to_delete)
+            self.populate_custom_colors_grid() # Refresh the grid
+            if self.main_window_ref and hasattr(self.main_window_ref, 'save_app_settings'):
+                self.main_window_ref.save_app_settings() # Save changes to config
+
 
 
 class DefaultColorsDialog(QDialog):
@@ -22,6 +161,7 @@ class DefaultColorsDialog(QDialog):
         self.setWindowTitle("Set Default Table Colors")
         self.setMinimumWidth(400)
         # Use constants.current_theme_settings which is updated by main_window
+        self.newly_picked_custom_colors = set() # To store hex strings of new custom colors
         self.setStyleSheet(f"QDialog {{ background-color: {constants.current_theme_settings.get('window_bg', QColor('#F0F0F0')).name()}; }} "
                            f"QLabel, QPushButton {{ color: {constants.current_theme_settings.get('dialog_text_color', QColor('#000000')).name()}; }}")
 
@@ -57,28 +197,65 @@ class DefaultColorsDialog(QDialog):
         layout.addWidget(self.buttonBox)
 
     def pick_body_color(self):
-        color = QColorDialog.getColor(self.current_body_color, self, "Choose Default Body Color")
-        if color.isValid():
-            self.current_body_color = color
-            self.body_color_button.setText(f"Body: {color.name()}")
-            self.body_color_button.setStyleSheet(
-                f"background-color: {color.name()}; color: {get_contrasting_text_color(color).name()}; padding: 5px;"
-            )
+        picker_dialog = AdvancedColorPickerDialog(self.current_body_color, self.main_window_ref, self)
+        if picker_dialog.exec():
+            chosen_color, was_new_custom = picker_dialog.get_result()
+            if chosen_color.isValid():
+                self.current_body_color = chosen_color
+                self.body_color_button.setText(f"Body: {chosen_color.name()}")
+                self.body_color_button.setStyleSheet(
+                    f"background-color: {chosen_color.name()}; color: {get_contrasting_text_color(chosen_color).name()}; padding: 5px;"
+                )
+                if was_new_custom:
+                    self.newly_picked_custom_colors.add(chosen_color.name())
 
     def pick_header_color(self):
-        color = QColorDialog.getColor(self.current_header_color, self, "Choose Default Header Color")
-        if color.isValid():
-            self.current_header_color = color
-            self.header_color_button.setText(f"Header: {color.name()}")
-            self.header_color_button.setStyleSheet(
-                f"background-color: {color.name()}; color: {get_contrasting_text_color(color).name()}; padding: 5px;"
-            )
+        picker_dialog = AdvancedColorPickerDialog(self.current_header_color, self.main_window_ref, self)
+        if picker_dialog.exec():
+            chosen_color, was_new_custom = picker_dialog.get_result()
+            if chosen_color.isValid():
+                self.current_header_color = chosen_color
+                self.header_color_button.setText(f"Header: {chosen_color.name()}")
+                self.header_color_button.setStyleSheet(
+                    f"background-color: {chosen_color.name()}; color: {get_contrasting_text_color(chosen_color).name()}; padding: 5px;"
+                )
+                if was_new_custom:
+                    self.newly_picked_custom_colors.add(chosen_color.name())
 
     def accept_changes(self):
-        self.main_window_ref.user_default_table_body_color = self.current_body_color
-        self.main_window_ref.user_default_table_header_color = self.current_header_color
-        self.main_window_ref.update_theme_settings() # This will update constants.current_theme_settings
-        self.main_window_ref.set_theme(self.main_window_ref.current_theme, force_update_tables=True)
+        old_body_color = self.main_window_ref.user_default_table_body_color
+        old_header_color = self.main_window_ref.user_default_table_header_color
+        
+        new_body_color = self.current_body_color
+        new_header_color = self.current_header_color
+
+        # Handle newly picked custom colors and save if list changed
+        custom_color_list_changed = False
+        if self.newly_picked_custom_colors:
+            current_saved_hex = {c.name() for c in constants.user_saved_custom_colors}
+            basic_hex = {QColor(bc_hex).name() for bc_hex in constants.BASIC_COLORS_HEX}
+            
+            for color_hex in self.newly_picked_custom_colors:
+                if color_hex not in current_saved_hex and color_hex not in basic_hex:
+                    constants.user_saved_custom_colors.append(QColor(color_hex))
+                    made_changes_to_custom_list = True
+            
+            if made_changes_to_custom_list:
+                constants.user_saved_custom_colors = constants.user_saved_custom_colors[-constants.MAX_SAVED_CUSTOM_COLORS:]
+                custom_color_list_changed = True # Ensure this flag is accurate
+
+        if custom_color_list_changed:
+             self.main_window_ref.save_app_settings() # Save custom color list changes
+
+        # Check if default colors actually changed
+        default_colors_changed = False
+        if (old_body_color.name() if old_body_color else None) != (new_body_color.name() if new_body_color else None) or \
+           (old_header_color.name() if old_header_color else None) != (new_header_color.name() if new_header_color else None):
+            from commands import EditDefaultColorsCommand # Local import
+            command = EditDefaultColorsCommand(self.main_window_ref,
+                                               old_body_color, old_header_color,
+                                               new_body_color, new_header_color)
+            self.main_window_ref.undo_stack.push(command)
         self.accept()
 
     def get_colors(self):
@@ -243,6 +420,7 @@ class TableDialog(QDialog):
         super().__init__(parent_window)
         self.main_window_ref = parent_window
         self.setWindowTitle("Table Details")
+        self.newly_picked_custom_colors_for_table = set() # לאיסוף צבעים חדשים שנבחרו עבור טבלה זו
         self.setMinimumSize(750, 500)
         self.setStyleSheet(f"""
             QDialog {{ background-color: {constants.current_theme_settings.get('window_bg', QColor('#F0F0F0')).name()}; }}
@@ -282,16 +460,28 @@ class TableDialog(QDialog):
         self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel) # Defined self.buttonBox
         self.buttonBox.button(QDialogButtonBox.StandardButton.Ok).setText("OK")
         self.buttonBox.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancel")
-        self.buttonBox.accepted.connect(self.accept); self.buttonBox.rejected.connect(self.reject)
+        self.buttonBox.accepted.connect(self.validate_and_accept); self.buttonBox.rejected.connect(self.reject)
         self.layout.addWidget(self.buttonBox)
 
     def choose_body_color(self):
-        color = QColorDialog.getColor(self.currentBodyColor, self, "Choose Table Body Color")
-        if color.isValid(): self.currentBodyColor = color; self.bodyColorButton.setStyleSheet(f"background-color: {self.currentBodyColor.name()}; color: {get_contrasting_text_color(self.currentBodyColor).name()}; padding: 5px;")
+        picker_dialog = AdvancedColorPickerDialog(self.currentBodyColor, self.main_window_ref, self)
+        if picker_dialog.exec():
+            chosen_color, was_new_custom = picker_dialog.get_result()
+            if chosen_color.isValid():
+                self.currentBodyColor = chosen_color
+                self.bodyColorButton.setStyleSheet(f"background-color: {self.currentBodyColor.name()}; color: {get_contrasting_text_color(self.currentBodyColor).name()}; padding: 5px;")
+                if was_new_custom:
+                    self.newly_picked_custom_colors_for_table.add(chosen_color.name())
 
     def choose_header_color(self):
-        color = QColorDialog.getColor(self.currentHeaderColor, self, "Choose Table Header Color")
-        if color.isValid(): self.currentHeaderColor = color; self.headerColorButton.setStyleSheet(f"background-color: {self.currentHeaderColor.name()}; color: {get_contrasting_text_color(self.currentHeaderColor).name()}; padding: 5px;")
+        picker_dialog = AdvancedColorPickerDialog(self.currentHeaderColor, self.main_window_ref, self)
+        if picker_dialog.exec():
+            chosen_color, was_new_custom = picker_dialog.get_result()
+            if chosen_color.isValid():
+                self.currentHeaderColor = chosen_color
+                self.headerColorButton.setStyleSheet(f"background-color: {self.currentHeaderColor.name()}; color: {get_contrasting_text_color(self.currentHeaderColor).name()}; padding: 5px;")
+                if was_new_custom:
+                    self.newly_picked_custom_colors_for_table.add(chosen_color.name())
 
     def add_column_entry(self, column_data=None):
         list_item = QListWidgetItem(self.columnsListWidget)
@@ -306,6 +496,27 @@ class TableDialog(QDialog):
         row = self.columnsListWidget.row(list_item_to_remove)
         if row != -1: self.columnsListWidget.takeItem(row)
 
+    def validate_and_accept(self):
+        """Validates table data before accepting the dialog."""
+        column_names = []
+        for i in range(self.columnsListWidget.count()):
+            list_item = self.columnsListWidget.item(i)
+            entry_widget = self.columnsListWidget.itemWidget(list_item)
+            if entry_widget:
+                # Directly access the name_edit widget's text for validation
+                col_name = entry_widget.name_edit.text().strip()
+                if col_name: # Only consider non-empty names for duplication check
+                    column_names.append(col_name)
+
+        duplicate_names = {name for name in column_names if column_names.count(name) > 1}
+
+        if duplicate_names:
+            QMessageBox.warning(self, "Duplicate Column Names",
+                                f"The following column names are duplicated: {', '.join(duplicate_names)}.\nPlease ensure all column names are unique.")
+            return # Do not accept the dialog
+
+        self.accept() # Proceed with accepting the dialog
+
     def get_table_data(self):
         table_name = self.tableNameInput.text().strip()
         columns = []
@@ -316,7 +527,7 @@ class TableDialog(QDialog):
                 col_data = entry_widget.get_data()
                 if col_data: columns.append(col_data)
         body_color = self.currentBodyColor.name(); header_color = self.currentHeaderColor.name()
-        return table_name, columns, body_color, header_color
+        return table_name, columns, body_color, header_color, self.newly_picked_custom_colors_for_table
 
 # --- Canvas Settings Dialog ---
 class CanvasSettingsDialog(QDialog):
@@ -412,4 +623,3 @@ class DataTypeSettingsDialog(QDialog):
             QMessageBox.warning(self, "Data Types Empty", "Data types list cannot be empty. Restoring defaults (TEXT, INTEGER).")
             return ["TEXT", "INTEGER"] 
         return types
-

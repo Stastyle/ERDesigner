@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QPen, QColor
 from data_models import Relationship
+import copy # For deepcopying column lists
 from gui_items import OrthogonalRelationshipPathItem 
 from commands import CreateRelationshipCommand, DeleteRelationshipCommand, SetRelationshipVerticalSegmentXCommand # Added SetRelationshipVerticalSegmentXCommand
 from dialogs import RelationshipDialog
@@ -24,11 +25,17 @@ def finalize_relationship_drawing_impl(window, source_table_data, source_column_
         pk_table, pk_col_obj = dest_table_data, dest_column_data
         fk_table, fk_col_obj = source_table_data, source_column_data
     else:
-        msg = "Cannot create relationship: One column must be a Primary Key (PK) and the other a non-PK (which will become the Foreign Key)."
+        # Invalid connection: either PK-PK or nonPK-nonPK, or one/both are FKs not suitable.
+        msg = "Cannot create relationship: One column must be a Primary Key (PK) and the other a non-PK (which will become the Foreign Key)." # Default
+
         if source_column_data.is_pk and dest_column_data.is_pk:
             msg = "Cannot connect two Primary Key columns directly. Choose one PK and one non-PK column."
-        elif not source_column_data.is_pk and not dest_column_data.is_pk:
-            msg = "Cannot connect two non-Primary Key columns. One column must be a Primary Key."
+        elif not source_column_data.is_pk and not dest_column_data.is_pk and \
+             not source_column_data.is_fk and not dest_column_data.is_fk:
+            # This specifically targets two "clean" non-PK, non-FK columns.
+            msg = "Cannot connect two non-Primary Key, non-Foreign Key columns. One column must be a Primary Key."
+        # For other invalid cases (e.g., FK-FK, or FK to non-PK/non-FK where the non-PK/non-FK isn't becoming the PK),
+        # the default message is generally appropriate.
         QMessageBox.warning(window, "Invalid Connection", msg)
         window.reset_drawing_mode()
         return
@@ -45,10 +52,78 @@ def finalize_relationship_drawing_impl(window, source_table_data, source_column_
             window.reset_drawing_mode()
             return
 
+    # Data type validation
+    if fk_col_obj.data_type != pk_col_obj.data_type:
+        msg_box = QMessageBox(window)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setTextFormat(Qt.TextFormat.RichText) # Ensure HTML is rendered
+        msg_box.setWindowTitle("Data Type Mismatch")
+        msg_box.setText(f"The data types of the selected columns do not match:<br><br>"
+                        f"<b>{fk_table.name}.{fk_col_obj.name}</b><br>&nbsp;&nbsp;&nbsp;&nbsp;Type: <b>{fk_col_obj.data_type}</b><br><br>"
+                        f"<b>{pk_table.name}.{pk_col_obj.name}</b><br>&nbsp;&nbsp;&nbsp;&nbsp;Type: <b>{pk_col_obj.data_type}</b><br><br>"
+                        "Do you want to align the data types?")
+
+        btn_change_fk = msg_box.addButton(f"Modify to\n{pk_col_obj.data_type}", QMessageBox.ButtonRole.YesRole) # To match PK type
+        btn_change_pk = msg_box.addButton(f"Modify to\n{fk_col_obj.data_type}", QMessageBox.ButtonRole.YesRole) # To match FK type
+        btn_proceed = msg_box.addButton("Don't Modify", QMessageBox.ButtonRole.NoRole)
+        btn_cancel = msg_box.addButton(QMessageBox.StandardButton.Cancel)
+
+        msg_box.exec()
+        clicked_button = msg_box.clickedButton()
+
+        type_changed = False
+        if clicked_button == btn_change_fk:
+            window.undo_stack.beginMacro("Change FK Type and Create Relationship") # Start macro
+            from commands import EditTableCommand # Local import
+            old_props = {"name": fk_table.name, "body_color_hex": fk_table.body_color.name(), "header_color_hex": fk_table.header_color.name(), "columns": copy.deepcopy(fk_table.columns)}
+            new_columns_fk = copy.deepcopy(fk_table.columns)
+            for col in new_columns_fk:
+                if col.name == fk_col_obj.name:
+                    col.data_type = pk_col_obj.data_type
+                    break
+            new_props = {"name": fk_table.name, "body_color_hex": fk_table.body_color.name(), "header_color_hex": fk_table.header_color.name(), "columns": new_columns_fk}
+            cmd_edit_fk = EditTableCommand(window, fk_table, old_props, new_props, description=f"Change {fk_col_obj.name} type")
+            window.undo_stack.push(cmd_edit_fk)
+            # fk_col_obj.data_type is now updated via the command's redo
+            type_changed = True
+        elif clicked_button == btn_change_pk:
+            window.undo_stack.beginMacro("Change PK Type and Create Relationship") # Start macro
+            from commands import EditTableCommand # Local import
+            old_props = {"name": pk_table.name, "body_color_hex": pk_table.body_color.name(), "header_color_hex": pk_table.header_color.name(), "columns": copy.deepcopy(pk_table.columns)}
+            new_columns_pk = copy.deepcopy(pk_table.columns)
+            for col in new_columns_pk:
+                if col.name == pk_col_obj.name:
+                    col.data_type = fk_col_obj.data_type
+                    break
+            new_props = {"name": pk_table.name, "body_color_hex": pk_table.body_color.name(), "header_color_hex": pk_table.header_color.name(), "columns": new_columns_pk}
+            cmd_edit_pk = EditTableCommand(window, pk_table, old_props, new_props, description=f"Change {pk_col_obj.name} type")
+            window.undo_stack.push(cmd_edit_pk)
+            # pk_col_obj.data_type is now updated via the command's redo
+            type_changed = True
+        elif clicked_button == btn_proceed:
+            pass # Proceed without changing types
+        else: # Cancel or closed dialog
+            window.reset_drawing_mode()
+            return
+        
+        # After a type change command, the original fk_col_obj/pk_col_obj references might be stale
+        # because EditTableCommand replaces the columns list with a deep copy.
+        # Re-fetch them if a change occurred to ensure we have the live objects.
+        if type_changed:
+            fk_col_obj = fk_table.get_column_by_name(fk_col_obj.name)
+            pk_col_obj = pk_table.get_column_by_name(pk_col_obj.name)
+            if not fk_col_obj or not pk_col_obj: # Should not happen if names didn't change
+                QMessageBox.critical(window, "Error", "Column not found after type change. Aborting relationship.")
+                window.reset_drawing_mode()
+                return
+
     default_rel_type = "N:1" 
     # New relationships are created with default (auto-calculated) vertical segment X
     command = CreateRelationshipCommand(window, fk_table, pk_table, fk_col_obj.name, pk_col_obj.name, default_rel_type, vertical_segment_x_override=None)
     window.undo_stack.push(command)
+
+    if type_changed: # If a macro was started
+        window.undo_stack.endMacro() # End macro
     window.reset_drawing_mode()
 
 
@@ -239,19 +314,20 @@ def update_fk_references_to_pk_impl(window, pk_table_name, old_pk_col_name, new_
 
 def remove_relationships_for_table_impl(window, table_name, old_columns_of_table=None):
     """
-    Removes relationships connected to a given table name.
-    If old_columns_of_table is provided (from EditTableCommand), it also checks
-    if FKs defined in that old state are no longer valid in the new state and removes their relationships.
+    Removes relationships that were defined by FKs in 'old_columns_of_table' of 'table_name'
+    if those FK definitions are no longer valid in the table's current state.
+    This is typically called during table edits where columns might change.
+    It does NOT unconditionally remove all relationships connected to table_name.
     """
     rels_to_remove = []
-    for rel in window.relationships_data:
-        if rel.table1_name == table_name or rel.table2_name == table_name:
-            if rel not in rels_to_remove:
-                rels_to_remove.append(rel)
 
     if old_columns_of_table:
-        current_table_obj = window.tables_data.get(table_name) 
+        # 'table_name' here is the name of the table *after* any potential rename in the edit command.
+        # 'old_columns_of_table' are the columns as they were *before* the edit.
+        current_table_obj = window.tables_data.get(table_name)
+        
         for old_col_data in old_columns_of_table:
+            # We are interested in FKs that *were* in old_columns_of_table and originated from the table being edited.
             if old_col_data.is_fk and old_col_data.references_table and old_col_data.references_column:
                 is_fk_still_valid_in_current_table = False
                 if current_table_obj:
@@ -263,10 +339,14 @@ def remove_relationships_for_table_impl(window, table_name, old_columns_of_table
                         is_fk_still_valid_in_current_table = True
 
                 if not is_fk_still_valid_in_current_table:
+                    # This FK from the old column set is no longer valid (e.g., column removed,
+                    # no longer an FK, or points to a different target in the new column set).
+                    # Find the relationship object that corresponded to this specific old FK definition.
                     rel_based_on_old_fk = next((r for r in window.relationships_data if
-                                                r.table1_name == table_name and r.fk_column_name == old_col_data.name and
-                                                r.table2_name == old_col_data.references_table and
-                                                r.pk_column_name == old_col_data.references_column), None)
+                                                r.table1_name == table_name and # Relationship's FK table must match current table name
+                                                r.fk_column_name == old_col_data.name and # FK column name matches
+                                                r.table2_name == old_col_data.references_table and # Target table matches
+                                                r.pk_column_name == old_col_data.references_column), None) # Target column matches
                     if rel_based_on_old_fk and rel_based_on_old_fk not in rels_to_remove:
                         rels_to_remove.append(rel_based_on_old_fk)
                         # print(f"  Marking relationship for removal due to FK change/removal in '{table_name}': {old_col_data.name} -> {old_col_data.references_table}.{old_col_data.references_column}")
