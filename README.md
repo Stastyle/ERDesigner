@@ -47,27 +47,6 @@ The ERD Design Tool is a PyQt6-based desktop application that allows users to vi
 * **Keyboard Shortcuts:**
     * Common operations like Copy (Ctrl+C), Paste (Ctrl+V), Delete, Undo (Ctrl+Z), Redo (Ctrl+Y/Ctrl+Shift+Z) are supported.
 
-## Planned Features (from `erd_tool_improvements_he`)
-
-* **UI/UX Enhancements:**
-    * Toolbar for common actions.
-    * Diagram Explorer improvements (drag to canvas, context menu).
-    * Mini-map for the canvas.
-    * Snap to other items.
-    * Zoom to selection.
-    * Customization of relationship line styles.
-    * Clearer visual distinction for PK/FK columns.
-* **Core Functionality:**
-    * Generate SQL scripts (CREATE TABLE, ALTER TABLE).
-    * Import schema from an existing database.
-    * Diagram validation and error checking.
-    * Support for additional relationship types (e.g., Identifying).
-    * Add annotations/notes to the canvas.
-* **Performance and Reliability:**
-    * Optimization for large diagrams.
-    * Unit tests for critical code sections.
-* **Other:**
-    * User documentation.
 
 ## Prerequisites
 
