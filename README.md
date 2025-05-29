@@ -125,7 +125,7 @@ We welcome contributions to the ERD Design Tool! If you'd like to contribute, pl
 * Submit pull requests with improvements or new features.
 
 
-
+Feel free to contact me at stas.meirovich@gmail.com
 ## License
 
 This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for details.
