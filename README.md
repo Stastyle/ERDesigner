@@ -124,8 +124,7 @@ We welcome contributions to the ERD Design Tool! If you'd like to contribute, pl
 * Report bugs or suggest features by opening an issue.
 * Submit pull requests with improvements or new features.
 
-If you find this tool useful and would like to support its development, you can make a donation via PayPal:
-[stastyle@gmail.com](mailto:stastyle@gmail.com)
+
 
 ## License
 
